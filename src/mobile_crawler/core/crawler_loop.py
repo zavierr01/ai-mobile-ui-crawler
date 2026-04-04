@@ -4,6 +4,7 @@ import json
 import time
 import base64
 import logging
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 import threading
@@ -29,6 +30,11 @@ from mobile_crawler.domain.traffic_capture_manager import TrafficCaptureManager
 from mobile_crawler.domain.video_recording_manager import VideoRecordingManager
 from mobile_crawler.infrastructure.mobsf_manager import MobSFManager
 from mobile_crawler.infrastructure.adb_client import ADBClient
+
+# DroidRun integration imports
+from mobile_crawler.domain.droidrun_agent_service import DroidRunAgentService
+from mobile_crawler.domain.adb_action_executor import ADBActionExecutor
+from mobile_crawler.infrastructure.ai_interaction_repository import AIInteractionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +133,11 @@ class CrawlerLoop:
         self.max_crawl_duration_seconds = 600
         # Use passed value or fallback to config
         self.top_bar_height = top_bar_height or self.config_manager.get('top_bar_height', 0)
+
+        # DroidRun agent integration
+        self._droidrun_agent_service: Optional[DroidRunAgentService] = None
+        self._adb_action_executor: Optional[ADBActionExecutor] = None
+        self._use_droidrun_agent = False
 
     def add_event_listener(self, listener: CrawlerEventListener) -> None:
         """Add an event listener."""
@@ -240,7 +251,11 @@ class CrawlerLoop:
             # Re-read configuration at run start (ensures UI settings are applied)
             self.max_crawl_steps = self.config_manager.get('max_crawl_steps', 15)
             self.max_crawl_duration_seconds = self.config_manager.get('max_crawl_duration_seconds', 600)
-            logger.info(f"Crawl configuration: max_steps={self.max_crawl_steps}, max_duration={self.max_crawl_duration_seconds}s")
+            self._use_droidrun_agent = self.config_manager.get('use_droidrun_agent', False)
+            logger.info(f"Crawl configuration: max_steps={self.max_crawl_steps}, max_duration={self.max_crawl_duration_seconds}s, droidrun={self._use_droidrun_agent}")
+
+            # Initialize DroidRun agent if enabled
+            self._initialize_droidrun_agent(run_id)
 
             # Initialize and start feature managers if enabled
             self._initialize_traffic_capture(run_id, session_path)
@@ -268,54 +283,60 @@ class CrawlerLoop:
             self.state_machine.transition_to(CrawlState.RUNNING)
             self._emit_event("on_state_changed", run_id, "initializing", "running")
 
-            # Main crawl loop
-            while self._should_continue(run_id, step_number, start_time):
-                # Check if paused - wait in a loop until resumed or stopped
-                while self.state_machine.state == CrawlState.PAUSED_MANUAL:
-                    time.sleep(0.1)  # Wait for resume or stop
-                    # Check if stop was requested while paused
+            # Main crawl execution
+            if self._use_droidrun_agent:
+                # Use DroidRun agent for multi-step planning and execution
+                step_success, reason = self._execute_droidrun_agent(run_id, self._target_package)
+                step_number = self.max_crawl_steps  # Mark as completed since DroidRun handles all steps
+            else:
+                # Traditional step-by-step crawl loop
+                while self._should_continue(run_id, step_number, start_time):
+                    # Check if paused - wait in a loop until resumed or stopped
+                    while self.state_machine.state == CrawlState.PAUSED_MANUAL:
+                        time.sleep(0.1)  # Wait for resume or stop
+                        # Check if stop was requested while paused
+                        if self.state_machine.state == CrawlState.STOPPING:
+                            break
+
+                    # Check if stopping
                     if self.state_machine.state == CrawlState.STOPPING:
                         break
-                
-                # Check if stopping
-                if self.state_machine.state == CrawlState.STOPPING:
-                    break
-                    
-                try:
-                    step_success, reason = self._execute_step(run_id, step_number)
-                    
-                    # Handle step-by-step pause (Phase 5)
-                    if self._step_by_step_enabled and self.state_machine.state != CrawlState.STOPPING:
-                        self.state_machine.transition_to(CrawlState.PAUSED_STEP)
-                        self._emit_event("on_state_changed", run_id, "running", "paused_step")
-                        self._emit_event("on_step_paused", run_id, step_number)
-                        
-                        self._step_advance_event.clear()
-                        # Track pause time for step-by-step
-                        step_pause_start = time.time()
-                        
-                        # Wait for UI to signal advance
-                        while not self._step_advance_event.is_set():
-                            if self.state_machine.state == CrawlState.STOPPING:
-                                break
-                            time.sleep(0.1)
-                            
-                        self._paused_duration += time.time() - step_pause_start
-                        
-                        # If we were resumed, go back to running state
-                        if self.state_machine.state == CrawlState.PAUSED_STEP:
-                            self.state_machine.transition_to(CrawlState.RUNNING)
-                            self._emit_event("on_state_changed", run_id, "paused_step", "running")
 
-                    if step_success:
-                        step_number += 1
-                    else:
-                        logger.info(f"Step {step_number} failed: {reason}")
-                        self._completion_reason = reason
-                        break
-                except Exception as e:
-                    # Fail the crawl
-                    raise
+                    try:
+                        step_success, reason = self._execute_step(run_id, step_number)
+
+                        # Handle step-by-step pause (Phase 5)
+                        if self._step_by_step_enabled and self.state_machine.state != CrawlState.STOPPING:
+                            self.state_machine.transition_to(CrawlState.PAUSED_STEP)
+                            self._emit_event("on_state_changed", run_id, "running", "paused_step")
+                            self._emit_event("on_step_paused", run_id, step_number)
+
+                            self._step_advance_event.clear()
+                            # Track pause time for step-by-step
+                            step_pause_start = time.time()
+
+                            # Wait for UI to signal advance
+                            while not self._step_advance_event.is_set():
+                                if self.state_machine.state == CrawlState.STOPPING:
+                                    break
+                                time.sleep(0.1)
+
+                            self._paused_duration += time.time() - step_pause_start
+
+                            # If we were resumed, go back to running state
+                            if self.state_machine.state == CrawlState.PAUSED_STEP:
+                                self.state_machine.transition_to(CrawlState.RUNNING)
+                                self._emit_event("on_state_changed", run_id, "paused_step", "running")
+
+                        if step_success:
+                            step_number += 1
+                        else:
+                            logger.info(f"Step {step_number} failed: {reason}")
+                            self._completion_reason = reason
+                            break
+                    except Exception as e:
+                        # Fail the crawl
+                        raise
 
             # Export run data to JSON
             try:
@@ -339,26 +360,12 @@ class CrawlerLoop:
         """Consolidated cleanup logic for consistent termination."""
         logger.info(f"Cleaning up crawl session {run_id}...")
         
-        # 1a. Stop traffic capture 
+        # 1. Stop feature managers (PCAP, Video)
         try:
             self._stop_traffic_capture(run_id, step_number)
+            self._stop_video_recording()
         except Exception as e:
-            logger.warning(f"Cleanup error during traffic stop: {e}")
-
-        # 1b. Stop video recording (inlined for direct visibility)
-        self._emit_event("on_debug_log", run_id, 0, f"[VIDEO] Cleanup: _video_recording_manager is {'SET' if self._video_recording_manager else 'None'}")
-        if self._video_recording_manager:
-            try:
-                self._emit_event("on_debug_log", run_id, 0, "[VIDEO] Calling stop_recording_and_save()...")
-                video_path, reason = self._video_recording_manager.stop_recording_and_save()
-                self._emit_event("on_debug_log", run_id, 0, f"[VIDEO] Result: path={video_path}, reason={reason}")
-                if video_path:
-                    logger.info(f"Video saved: {video_path}")
-                else:
-                    logger.warning(f"Video not saved: {reason}")
-            except Exception as e:
-                self._emit_event("on_debug_log", run_id, 0, f"[VIDEO] Exception during stop: {type(e).__name__}: {e}")
-                logger.error(f"Error stopping video: {e}", exc_info=True)
+            logger.warning(f"Cleanup error during feature stop: {e}")
 
         # 2. Run MobSF analysis (if enabled and NOT stopped early)
         try:
@@ -1114,17 +1121,17 @@ class CrawlerLoop:
 
             # Start recording
             logger.debug(f"[DEBUG] Calling start_recording(run_id={run_id}, step_num=1, session_path={session_path})...")
-            success, reason = self._video_recording_manager.start_recording(
+            success = self._video_recording_manager.start_recording(
                 run_id=run_id, step_num=1, session_path=session_path
             )
-            logger.debug(f"[DEBUG] start_recording() returned: {success}, reason: {reason}")
+            logger.debug(f"[DEBUG] start_recording() returned: {success}")
             
             if success:
                 logger.info(f"Video recording started for run {run_id}")
                 self._emit_event("on_debug_log", run_id, 0, "Video recording STARTED successfully")
             else:
-                logger.warning(f"Failed to start video recording for run {run_id}: {reason}")
-                self._emit_event("on_debug_log", run_id, 0, f"Video recording FAILED to start - {reason}")
+                logger.warning(f"Failed to start video recording for run {run_id}")
+                self._emit_event("on_debug_log", run_id, 0, "Video recording FAILED to start - crawl will continue without video")
                 self._emit_event("on_debug_log", run_id, 0, "[DEBUG] Check Appium driver connection and device capabilities")
         except Exception as e:
             error_msg = f"Error initializing video recording: {e}"
@@ -1134,44 +1141,25 @@ class CrawlerLoop:
             # Don't fail the crawl if video recording fails
             self._video_recording_manager = None
 
-    def _stop_video_recording(self, run_id: int) -> None:
-        """Stop video recording and save video file.
-        
-        Args:
-            run_id: Run ID for event logging
-        """
-        logger.debug("[DEBUG] _stop_video_recording called for run {run_id}")
-        
+    def _stop_video_recording(self) -> None:
+        """Stop video recording and save video file."""
         if not self._video_recording_manager:
-            logger.debug("[DEBUG] _video_recording_manager is None in _stop_video_recording")
             return
 
         try:
-            logger.debug(f"[DEBUG] Stopping video recording for run {run_id}...")
-            self._emit_event("on_debug_log", run_id, 0, "Stopping video recording...")
-            
-            video_path, reason = self._video_recording_manager.stop_recording_and_save()
-            
+            video_path = self._video_recording_manager.stop_recording_and_save()
             if video_path:
                 logger.info(f"Video recording completed. Video file saved: {video_path}")
-                self._emit_event("on_debug_log", run_id, 0, f"Video recording saved: {video_path}")
-                if reason != "Success":
-                    self._emit_event("on_debug_log", run_id, 0, f"Video saving warning: {reason}")
             else:
-                logger.warning(f"Video recording stopped but video file not saved: {reason}")
-                self._emit_event("on_debug_log", run_id, 0, f"Video recording FAILED to save: {reason}")
-                
+                logger.warning("Video recording stopped but video file not saved")
         except Exception as e:
             logger.error(f"Error stopping video recording: {e}", exc_info=True)
-            self._emit_event("on_debug_log", run_id, 0, f"Error stopping video recording: {e}")
-            
             # Don't fail the crawl if video recording stop fails
             # Try to save partial recording
             try:
                 partial_path = self._video_recording_manager.save_partial_on_crash()
                 if partial_path:
                     logger.info(f"Partial video recording saved: {partial_path}")
-                    self._emit_event("on_debug_log", run_id, 0, f"Partial video recording saved: {partial_path}")
             except Exception:
                 pass
 
@@ -1390,3 +1378,122 @@ class CrawlerLoop:
                 # Don't let listener exceptions break the crawler
                 # In a real implementation, you might want to log this
                 pass
+
+    def _initialize_droidrun_agent(self, run_id: int) -> None:
+        """Initialize DroidRun agent if enabled.
+
+        Args:
+            run_id: Current run ID
+        """
+        if not self._use_droidrun_agent:
+            return
+
+        try:
+            logger.info("Initializing DroidRun agent...")
+            self._emit_event("on_debug_log", run_id, 0, "Initializing DroidRun agent...")
+
+            # Get device ID from Appium driver
+            device_id = getattr(self.appium_driver, 'device_id', None)
+            if not device_id:
+                logger.error("Device ID not available for DroidRun agent")
+                raise RuntimeError("Device ID required for DroidRun agent")
+
+            # Initialize AI interaction repository
+            db = DatabaseManager()
+            ai_repo = AIInteractionRepository(db)
+
+            # Create DroidRun agent service
+            self._droidrun_agent_service = DroidRunAgentService(
+                config_manager=self.config_manager,
+                ai_interaction_repository=ai_repo,
+                device_id=device_id
+            )
+
+            # Initialize ADB action executor if needed
+            if self.config_manager.get('use_adb_actions', True):
+                self._adb_action_executor = ADBActionExecutor(device_id)
+                logger.info("Initialized ADB action executor")
+
+            logger.info("DroidRun agent initialized successfully")
+            self._emit_event("on_debug_log", run_id, 0, "DroidRun agent initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Failed to initialize DroidRun agent: {e}")
+            self._emit_event("on_debug_log", run_id, 0, f"DroidRun agent initialization failed: {e}")
+            # Fallback to traditional mode
+            self._use_droidrun_agent = False
+            raise
+
+    def _execute_droidrun_agent(self, run_id: int, app_package: str) -> tuple[bool, str]:
+        """Execute DroidRun agent for app exploration.
+
+        Args:
+            run_id: Current run ID
+            app_package: Target app package name
+
+        Returns:
+            Tuple of (success, reason)
+        """
+        if not self._droidrun_agent_service:
+            return False, "DroidRun agent not initialized"
+
+        try:
+            logger.info(f"Executing DroidRun agent for app: {app_package}")
+            self._emit_event("on_debug_log", run_id, 1, f"Starting DroidRun agent execution for {app_package}")
+
+            # Create exploration objective based on configuration
+            exploration_objective = self.config_manager.get('exploration_objective', None)
+
+            # Execute DroidRun agent synchronously
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    self._droidrun_agent_service.execute_exploration_task(
+                        run_id=run_id,
+                        app_package=app_package,
+                        max_steps=self.max_crawl_steps,
+                        exploration_objective=exploration_objective
+                    )
+                )
+            finally:
+                loop.close()
+
+            if result.success:
+                logger.info(f"DroidRun agent completed: {result.steps_completed} steps")
+                self._emit_event("on_debug_log", run_id, 1,
+                    f"DroidRun agent completed: {result.steps_completed} steps in {result.total_duration_ms:.1f}ms")
+
+                # Emit events for each action taken
+                for i, action_data in enumerate(result.actions_taken):
+                    # Convert to crawler format and emit action events
+                    self._emit_event("on_action_executed", run_id, i+1, 0, {
+                        'success': True,
+                        'action_type': action_data.get('action', 'unknown'),
+                        'description': action_data.get('description', ''),
+                        'duration_ms': action_data.get('duration_ms', 0)
+                    })
+
+                return True, "DroidRun agent completed successfully"
+            else:
+                error_msg = result.error_message or "Unknown error"
+                logger.error(f"DroidRun agent failed: {error_msg}")
+                self._emit_event("on_debug_log", run_id, 1, f"DroidRun agent failed: {error_msg}")
+                return False, f"DroidRun agent failed: {error_msg}"
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"DroidRun agent execution error: {error_msg}")
+            self._emit_event("on_debug_log", run_id, 1, f"DroidRun agent execution error: {error_msg}")
+            return False, f"DroidRun agent error: {error_msg}"
+
+    async def cleanup(self) -> None:
+        """Cleanup DroidRun agent resources."""
+        if self._droidrun_agent_service:
+            try:
+                await self._droidrun_agent_service.cleanup()
+                logger.info("DroidRun agent cleaned up successfully")
+            except Exception as e:
+                logger.warning(f"Error during DroidRun agent cleanup: {e}")
+            finally:
+                self._droidrun_agent_service = None

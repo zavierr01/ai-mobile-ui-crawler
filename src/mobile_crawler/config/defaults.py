@@ -77,4 +77,20 @@ DEFAULTS: Dict[str, Any] = {
     # HTTP request timeout for MobSF API calls (in seconds)
     'mobsf_request_timeout': 300,  # 5 minutes for large report downloads
     # Test credentials
+
+    # DroidRun Agent Integration settings
+    # Enable DroidRun's advanced AI agent system for multi-step planning
+    'use_droidrun_agent': False,
+    # Use reasoning mode for complex planning (vs direct execution)
+    'droidrun_reasoning_mode': True,
+    # Maximum planning/execution cycles for DroidRun agent
+    'droidrun_max_cycles': 5,
+    # Agent streaming output (for real-time updates)
+    'droidrun_streaming': False,
+    # DroidRun agent retry count for failed operations
+    'droidrun_retry_count': 2,
+    # Use ADB for actions instead of Appium (recommended with DroidRun)
+    'use_adb_actions': False,
+    # DroidRun telemetry and monitoring
+    'droidrun_telemetry_enabled': False,
 }

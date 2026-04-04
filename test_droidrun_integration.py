@@ -1,0 +1,135 @@
+#!/usr/bin/env python
+"""Test script for DroidRun integration."""
+
+import sys
+import os
+import logging
+from pathlib import Path
+
+# Add src to Python path
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def test_droidrun_import():
+    """Test DroidRun import and basic functionality."""
+    try:
+        import droidrun
+        logger.info(f"✅ DroidRun imported successfully (version: {getattr(droidrun, '__version__', 'unknown')})")
+        return True
+    except ImportError as e:
+        logger.error(f"❌ Failed to import DroidRun: {e}")
+        return False
+
+def test_mobile_crawler_imports():
+    """Test mobile crawler imports."""
+    try:
+        from mobile_crawler.config.config_manager import ConfigManager
+        logger.info("✅ ConfigManager import successful")
+
+        from mobile_crawler.domain.droidrun_agent_service import DroidRunAgentService
+        logger.info("✅ DroidRunAgentService import successful")
+
+        from mobile_crawler.domain.adb_action_executor import ADBActionExecutor
+        logger.info("✅ ADBActionExecutor import successful")
+
+        return True
+    except ImportError as e:
+        logger.error(f"❌ Failed to import mobile crawler components: {e}")
+        return False
+
+def test_droidrun_config():
+    """Test DroidRun configuration creation."""
+    try:
+        from mobile_crawler.config.config_manager import ConfigManager
+        from mobile_crawler.domain.droidrun_agent_service import DroidRunAgentService
+        from mobile_crawler.infrastructure.database import DatabaseManager
+        from mobile_crawler.infrastructure.ai_interaction_repository import AIInteractionRepository
+
+        # Create test configuration
+        config_manager = ConfigManager()
+        config_manager.set('use_droidrun_agent', True)
+        config_manager.set('ai_provider', 'mock')  # Use mock provider for testing
+
+        # Initialize database components
+        db = DatabaseManager()
+        ai_repo = AIInteractionRepository(db)
+
+        # Test DroidRun agent service creation
+        agent_service = DroidRunAgentService(
+            config_manager=config_manager,
+            ai_interaction_repository=ai_repo,
+            device_id="test_device"
+        )
+
+        logger.info("✅ DroidRun agent service created successfully")
+
+        # Test configuration conversion
+        droidrun_config = agent_service._get_droidrun_config()
+        logger.info(f"✅ DroidRun configuration created: {list(droidrun_config.keys())}")
+
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to create DroidRun configuration: {e}")
+        return False
+
+def test_adb_executor():
+    """Test ADB action executor."""
+    try:
+        from mobile_crawler.domain.adb_action_executor import ADBActionExecutor
+
+        # Create executor (won't actually connect to device)
+        executor = ADBActionExecutor(device_id="test_device")
+        logger.info("✅ ADB action executor created successfully")
+
+        return True
+    except Exception as e:
+        logger.error(f"❌ Failed to create ADB action executor: {e}")
+        return False
+
+def test_ui_imports():
+    """Test UI component imports."""
+    try:
+        from mobile_crawler.ui.widgets.settings_panel import SettingsPanel
+        logger.info("✅ Settings panel import successful")
+
+        return True
+    except ImportError as e:
+        logger.error(f"❌ Failed to import UI components: {e}")
+        return False
+
+def main():
+    """Run all tests."""
+    logger.info("🚀 Starting DroidRun integration tests...")
+
+    tests = [
+        ("DroidRun Import", test_droidrun_import),
+        ("Mobile Crawler Imports", test_mobile_crawler_imports),
+        ("DroidRun Configuration", test_droidrun_config),
+        ("ADB Action Executor", test_adb_executor),
+        ("UI Components", test_ui_imports),
+    ]
+
+    passed = 0
+    total = len(tests)
+
+    for test_name, test_func in tests:
+        logger.info(f"\n--- Running {test_name} ---")
+        if test_func():
+            passed += 1
+        else:
+            logger.error(f"Test '{test_name}' failed")
+
+    logger.info(f"\n📊 Test Results: {passed}/{total} tests passed")
+
+    if passed == total:
+        logger.info("🎉 All tests passed! DroidRun integration is ready.")
+        return 0
+    else:
+        logger.error("❌ Some tests failed. Please check the installation.")
+        return 1
+
+if __name__ == "__main__":
+    exit(main())

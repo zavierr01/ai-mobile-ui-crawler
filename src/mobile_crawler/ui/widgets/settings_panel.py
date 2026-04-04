@@ -64,7 +64,10 @@ class SettingsPanel(QWidget):
         # 3. Integrations Tab (Traffic, Video, MobSF)
         self.tab_widget.addTab(self._setup_integrations_tab(), "Integrations")
         
-        # 4. Credentials Tab (Test Credentials)
+        # 4. DroidRun Agent Tab (AI Agent Settings)
+        self.tab_widget.addTab(self._setup_droidrun_tab(), "DroidRun Agent")
+
+        # 5. Credentials Tab (Test Credentials)
         self.tab_widget.addTab(self._setup_credentials_tab(), "Credentials")
         
         main_layout.addWidget(self.tab_widget)
@@ -252,6 +255,107 @@ class SettingsPanel(QWidget):
         mobsf_group.setLayout(mobsf_layout)
         layout.addWidget(mobsf_group)
         
+        layout.addStretch()
+        return self._wrap_in_scroll_area(tab)
+
+    def _setup_droidrun_tab(self) -> QWidget:
+        """Create the DroidRun Agent settings tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(15)
+
+        # DroidRun Agent group
+        droidrun_group = QGroupBox("DroidRun AI Agent Integration")
+        droidrun_layout = QVBoxLayout()
+        droidrun_layout.setSpacing(12)
+        droidrun_layout.setContentsMargins(15, 20, 15, 20)
+
+        # Enable DroidRun Agent checkbox
+        self.enable_droidrun_checkbox = QCheckBox("Enable DroidRun AI Agent")
+        self.enable_droidrun_checkbox.setToolTip(
+            "Use DroidRun's advanced multi-step planning agent instead of single-shot AI responses"
+        )
+        droidrun_layout.addWidget(self.enable_droidrun_checkbox)
+
+        # Reasoning mode checkbox
+        self.droidrun_reasoning_checkbox = QCheckBox("Use Reasoning Mode")
+        self.droidrun_reasoning_checkbox.setToolTip(
+            "Enable complex planning with ManagerAgent → ExecutorAgent cycles (vs direct execution)"
+        )
+        self.droidrun_reasoning_checkbox.setChecked(True)
+        droidrun_layout.addWidget(self.droidrun_reasoning_checkbox)
+
+        # Max cycles setting
+        max_cycles_layout = QHBoxLayout()
+        max_cycles_label = QLabel("Max Planning Cycles:")
+        max_cycles_layout.addWidget(max_cycles_label)
+        self.droidrun_max_cycles_input = QSpinBox()
+        self.droidrun_max_cycles_input.setRange(1, 20)
+        self.droidrun_max_cycles_input.setValue(5)
+        self.droidrun_max_cycles_input.setToolTip("Maximum planning/execution cycles for DroidRun agent")
+        max_cycles_layout.addWidget(self.droidrun_max_cycles_input)
+        max_cycles_layout.addStretch()
+        droidrun_layout.addLayout(max_cycles_layout)
+
+        # Enable streaming checkbox
+        self.droidrun_streaming_checkbox = QCheckBox("Enable Streaming Output")
+        self.droidrun_streaming_checkbox.setToolTip(
+            "Show real-time agent planning and execution updates"
+        )
+        droidrun_layout.addWidget(self.droidrun_streaming_checkbox)
+
+        # Agent retry count
+        retry_layout = QHBoxLayout()
+        retry_label = QLabel("Agent Retry Count:")
+        retry_layout.addWidget(retry_label)
+        self.droidrun_retry_count_input = QSpinBox()
+        self.droidrun_retry_count_input.setRange(0, 10)
+        self.droidrun_retry_count_input.setValue(2)
+        self.droidrun_retry_count_input.setToolTip("Number of retries for failed agent operations")
+        retry_layout.addWidget(self.droidrun_retry_count_input)
+        retry_layout.addStretch()
+        droidrun_layout.addLayout(retry_layout)
+
+        droidrun_group.setLayout(droidrun_layout)
+        layout.addWidget(droidrun_group)
+
+        # Action Execution group
+        action_group = QGroupBox("Action Execution")
+        action_layout = QVBoxLayout()
+        action_layout.setSpacing(12)
+        action_layout.setContentsMargins(15, 20, 15, 20)
+
+        # Use ADB actions checkbox
+        self.use_adb_actions_checkbox = QCheckBox("Use ADB for Actions (Recommended with DroidRun)")
+        self.use_adb_actions_checkbox.setToolTip(
+            "Use ADB commands instead of Appium WebDriver for device actions"
+        )
+        action_layout.addWidget(self.use_adb_actions_checkbox)
+
+        # Telemetry checkbox
+        self.droidrun_telemetry_checkbox = QCheckBox("Enable DroidRun Telemetry")
+        self.droidrun_telemetry_checkbox.setToolTip(
+            "Enable DroidRun's built-in monitoring and tracing"
+        )
+        action_layout.addWidget(self.droidrun_telemetry_checkbox)
+
+        action_group.setLayout(action_layout)
+        layout.addWidget(action_group)
+
+        # Enable/disable controls based on main checkbox
+        def on_droidrun_enabled_changed(enabled):
+            self.droidrun_reasoning_checkbox.setEnabled(enabled)
+            self.droidrun_max_cycles_input.setEnabled(enabled)
+            self.droidrun_streaming_checkbox.setEnabled(enabled)
+            self.droidrun_retry_count_input.setEnabled(enabled)
+            self.use_adb_actions_checkbox.setEnabled(enabled)
+            self.droidrun_telemetry_checkbox.setEnabled(enabled)
+
+        self.enable_droidrun_checkbox.toggled.connect(on_droidrun_enabled_changed)
+
+        # Initially disable if not checked
+        on_droidrun_enabled_changed(self.enable_droidrun_checkbox.isChecked())
+
         layout.addStretch()
         return self._wrap_in_scroll_area(tab)
 
@@ -443,6 +547,28 @@ class SettingsPanel(QWidget):
                 # Auto-save the key to the config store for future use
                 self._config_store.set_secret_plaintext("mobsf_api_key", mobsf_api_key)
 
+        # Load DroidRun Agent settings
+        enable_droidrun = self._config_store.get_setting("use_droidrun_agent", default=False)
+        self.enable_droidrun_checkbox.setChecked(enable_droidrun)
+
+        droidrun_reasoning = self._config_store.get_setting("droidrun_reasoning_mode", default=True)
+        self.droidrun_reasoning_checkbox.setChecked(droidrun_reasoning)
+
+        droidrun_max_cycles = self._config_store.get_setting("droidrun_max_cycles", default=5)
+        self.droidrun_max_cycles_input.setValue(droidrun_max_cycles)
+
+        droidrun_streaming = self._config_store.get_setting("droidrun_streaming", default=False)
+        self.droidrun_streaming_checkbox.setChecked(droidrun_streaming)
+
+        droidrun_retry_count = self._config_store.get_setting("droidrun_retry_count", default=2)
+        self.droidrun_retry_count_input.setValue(droidrun_retry_count)
+
+        use_adb_actions = self._config_store.get_setting("use_adb_actions", default=False)
+        self.use_adb_actions_checkbox.setChecked(use_adb_actions)
+
+        droidrun_telemetry = self._config_store.get_setting("droidrun_telemetry_enabled", default=False)
+        self.droidrun_telemetry_checkbox.setChecked(droidrun_telemetry)
+
     def _load_mobsf_api_key_from_file(self) -> str:
         """Load MobSF API key from the startup script's output file.
         
@@ -582,6 +708,28 @@ class SettingsPanel(QWidget):
                 self._config_store.set_secret_plaintext("mobsf_api_key", mobsf_api_key)
             else:
                 self._config_store.delete_secret("mobsf_api_key")
+
+            # Save DroidRun Agent settings
+            enable_droidrun = self.enable_droidrun_checkbox.isChecked()
+            self._config_store.set_setting("use_droidrun_agent", enable_droidrun, "bool")
+
+            droidrun_reasoning = self.droidrun_reasoning_checkbox.isChecked()
+            self._config_store.set_setting("droidrun_reasoning_mode", droidrun_reasoning, "bool")
+
+            droidrun_max_cycles = self.droidrun_max_cycles_input.value()
+            self._config_store.set_setting("droidrun_max_cycles", droidrun_max_cycles, "int")
+
+            droidrun_streaming = self.droidrun_streaming_checkbox.isChecked()
+            self._config_store.set_setting("droidrun_streaming", droidrun_streaming, "bool")
+
+            droidrun_retry_count = self.droidrun_retry_count_input.value()
+            self._config_store.set_setting("droidrun_retry_count", droidrun_retry_count, "int")
+
+            use_adb_actions = self.use_adb_actions_checkbox.isChecked()
+            self._config_store.set_setting("use_adb_actions", use_adb_actions, "bool")
+
+            droidrun_telemetry = self.droidrun_telemetry_checkbox.isChecked()
+            self._config_store.set_setting("droidrun_telemetry_enabled", droidrun_telemetry, "bool")
 
             # Emit signal
             self.settings_saved.emit()

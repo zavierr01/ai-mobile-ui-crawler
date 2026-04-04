@@ -552,7 +552,9 @@ class AppiumDriver:
         
         try:
             driver = self.get_driver()
-            # self.get_driver() raises SessionLostError if no driver
+            if driver is None:
+                logger.error("[DEBUG] AppiumDriver.get_driver() returned None")
+                return False
             
             logger.debug(f"[DEBUG] Appium driver available, session_id: {getattr(driver, 'session_id', 'N/A')}")
             logger.debug("[DEBUG] Calling driver.start_recording_screen()...")
@@ -561,25 +563,33 @@ class AppiumDriver:
             logger.info("Screen recording started")
             logger.debug("[DEBUG] driver.start_recording_screen() completed successfully")
             return True
-        except SessionLostError:
-            raise  # Re-raise session lost
+        except SessionLostError as e:
+            error_msg = f"Appium session lost: {e}"
+            logger.error(error_msg)
+            logger.debug(f"[DEBUG] SessionLostError: {str(e)}")
+            return False
         except WebDriverException as e:
+            error_msg = f"Failed to start screen recording: {e}"
+            logger.error(error_msg)
+            logger.debug(f"[DEBUG] WebDriverException details: {type(e).__name__}: {str(e)}")
+            logger.debug(f"[DEBUG] Exception args: {e.args if hasattr(e, 'args') else 'N/A'}")
             # Check if it's the benign "No such process" error from cleanup
             if "No such process" in str(e):
                 logger.info("Screen recording started (ignoring 'No such process' cleanup error)")
                 logger.debug("[DEBUG] Treating 'No such process' as success")
                 return True
-            error_msg = f"Failed to start screen recording: {e}"
-            logger.error(error_msg)
-            raise AppiumDriverError(error_msg) from e
+            return False
         except AttributeError as e:
             error_msg = f"start_recording_screen method not available: {e}"
             logger.error(error_msg)
-            raise AppiumDriverError(error_msg) from e
+            logger.debug(f"[DEBUG] AttributeError - driver may not support screen recording: {e}")
+            logger.debug(f"[DEBUG] Driver type: {type(driver) if 'driver' in locals() else 'N/A'}")
+            return False
         except Exception as e:
             error_msg = f"Unexpected error starting screen recording: {e}"
             logger.error(error_msg, exc_info=True)
-            raise AppiumDriverError(error_msg) from e
+            logger.debug(f"[DEBUG] Unexpected exception type: {type(e).__name__}: {str(e)}")
+            return False
 
     def stop_recording_screen(self) -> Optional[str]:
         """Stop screen recording and get base64 encoded video data.
@@ -591,6 +601,9 @@ class AppiumDriver:
         
         try:
             driver = self.get_driver()
+            if driver is None:
+                logger.error("[DEBUG] AppiumDriver.get_driver() returned None")
+                return None
             
             logger.debug(f"[DEBUG] Appium driver available, session_id: {getattr(driver, 'session_id', 'N/A')}")
             logger.debug("[DEBUG] Calling driver.stop_recording_screen()...")
@@ -604,21 +617,31 @@ class AppiumDriver:
                 logger.warning("[DEBUG] stop_recording_screen() returned None or empty string")
             
             return video_base64
-        except SessionLostError:
-            raise
+        except SessionLostError as e:
+            error_msg = f"Appium session lost: {e}"
+            logger.error(error_msg)
+            logger.debug(f"[DEBUG] SessionLostError: {str(e)}")
+            return None
         except WebDriverException as e:
             error_msg = f"Failed to stop screen recording: {e}"
             logger.error(error_msg)
-            raise AppiumDriverError(error_msg) from e
+            logger.debug(f"[DEBUG] WebDriverException details: {type(e).__name__}: {str(e)}")
+            return None
         except AttributeError as e:
             error_msg = f"stop_recording_screen method not available: {e}"
             logger.error(error_msg)
-            raise AppiumDriverError(error_msg) from e
+            logger.debug(f"[DEBUG] AttributeError - driver may not support screen recording: {e}")
+            return None
         except Exception as e:
             error_msg = f"Unexpected error stopping screen recording: {e}"
             logger.error(error_msg, exc_info=True)
-            raise AppiumDriverError(error_msg) from e
+            logger.debug(f"[DEBUG] Unexpected exception type: {type(e).__name__}: {str(e)}")
+            return None
 
     def __enter__(self):
         """Context manager entry."""
         return self.connect()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit."""
+        self.disconnect()
