@@ -622,19 +622,29 @@ class MainWindow(QMainWindow):
 
     def _update_crawl_ui_state(self, running: bool) -> None:
         """Update UI elements based on crawl state.
-        
+
         Args:
             running: True if crawl is running
         """
-        # Control panel state is updated via signal_adapter.state_changed
+        # Update control panel state immediately to avoid race condition
+        # with async state_changed signal from worker thread
+        if self.control_panel:
+            if running:
+                from mobile_crawler.core.crawl_state_machine import CrawlState
+                self.control_panel.update_state(CrawlState.RUNNING)
+            else:
+                # When not running, reset to UNINITIALIZED state
+                from mobile_crawler.core.crawl_state_machine import CrawlState
+                self.control_panel.update_state(CrawlState.UNINITIALIZED)
+
         # Disable/enable configuration widgets
         widgets_to_toggle = [
             self.device_selector,
-            self.app_selector, 
+            self.app_selector,
             self.ai_selector,
             self.settings_panel
         ]
-        
+
         for widget in widgets_to_toggle:
             if hasattr(widget, 'setEnabled'):
                 widget.setEnabled(not running)
