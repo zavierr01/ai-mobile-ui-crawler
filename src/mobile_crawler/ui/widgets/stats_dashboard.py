@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QFrame,
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont
 
 
 def _make_section_label(text: str) -> QLabel:
@@ -29,13 +29,8 @@ def _make_separator() -> QFrame:
 
 
 class StatsDashboard(QWidget):
-    """Widget for displaying real-time crawl statistics.
+    """Widget for displaying real-time crawl statistics."""
 
-    Shows key metrics including steps, screens, errors, AI performance,
-    success rate, and last action — all updating live during the run.
-    """
-
-    # Signal emitted when stats are updated
     stats_updated = Signal()  # type: ignore
 
     def __init__(self, parent=None):
@@ -130,35 +125,12 @@ class StatsDashboard(QWidget):
         grid.addWidget(_make_separator(), row, 0, 1, 2)
         row += 1
 
-        # ── Screens ─────────────────────────────────────────────
-        grid.addWidget(_make_section_label("Screens"), row, 0, 1, 2)
-        row += 1
-
-        self.unique_screens_label = QLabel("Unique Screens: 0")
-        grid.addWidget(self.unique_screens_label, row, 0)
-
-        self.screens_per_min_label = QLabel("Screens/min: —")
-        grid.addWidget(self.screens_per_min_label, row, 1)
-        row += 1
-
-        grid.addWidget(_make_separator(), row, 0, 1, 2)
-        row += 1
-
         # ── Duration ─────────────────────────────────────────────
         grid.addWidget(_make_section_label("Duration"), row, 0, 1, 2)
         row += 1
 
         self.duration_label = QLabel("Elapsed: 0s")
-        grid.addWidget(self.duration_label, row, 0)
-        row += 1
-
-        grid.addWidget(QLabel("Time Progress:"), row, 0)
-        self.time_progress_bar = QProgressBar()
-        self.time_progress_bar.setRange(0, self._max_duration_seconds)
-        self.time_progress_bar.setValue(0)
-        self.time_progress_bar.setTextVisible(True)
-        self.time_progress_bar.setFormat("%v / %m seconds")
-        grid.addWidget(self.time_progress_bar, row, 1)
+        grid.addWidget(self.duration_label, row, 0, 1, 2)
         row += 1
 
         self.stats_content.setVisible(False)
@@ -176,18 +148,21 @@ class StatsDashboard(QWidget):
         self.step_progress_bar.setFormat(f"%v / {max_steps} steps")
 
     def set_max_duration(self, max_duration_seconds: int):
+        """Store max duration for progress tracking."""
         self._max_duration_seconds = max_duration_seconds
-        self.time_progress_bar.setRange(0, max_duration_seconds)
-        self.time_progress_bar.setFormat(f"%v / {max_duration_seconds} seconds")
+        if getattr(self, "_progress_mode", "steps") == "duration":
+            self.step_progress_bar.setRange(0, max_duration_seconds)
+            self.step_progress_bar.setFormat(f"%v / {max_duration_seconds} sec")
 
     def set_progress_mode(self, mode: str):
-        """Show the relevant progress bar based on limit mode."""
-        if mode == "steps":
-            self.step_progress_bar.setVisible(True)
-            self.time_progress_bar.setVisible(False)
+        """Set whether the progress bar tracks 'steps' or 'duration'."""
+        self._progress_mode = mode
+        if mode == "duration":
+            self.step_progress_bar.setRange(0, self._max_duration_seconds)
+            self.step_progress_bar.setFormat(f"%v / {self._max_duration_seconds} sec")
         else:
-            self.step_progress_bar.setVisible(False)
-            self.time_progress_bar.setVisible(True)
+            self.step_progress_bar.setRange(0, self._max_steps)
+            self.step_progress_bar.setFormat(f"%v / {self._max_steps} steps")
 
     def update_stats(
         self,
@@ -207,8 +182,7 @@ class StatsDashboard(QWidget):
         step_progress: str = "",
         success_rate: float = 0.0,
     ):
-        """Update all statistics labels and progress bars."""
-        # Reveal stats content when activity starts
+        """Update all statistics labels and progress bar."""
         if total_steps > 0 or duration_seconds > 0:
             self.placeholder_label.setVisible(False)
             self.stats_content.setVisible(True)
@@ -223,7 +197,10 @@ class StatsDashboard(QWidget):
         else:
             self.current_step_label.setText("Current: —")
 
-        self.step_progress_bar.setValue(min(total_steps, self._max_steps))
+        if getattr(self, "_progress_mode", "steps") == "duration":
+            self.step_progress_bar.setValue(min(int(duration_seconds), self._max_duration_seconds))
+        else:
+            self.step_progress_bar.setValue(min(total_steps, self._max_steps))
 
         # ── Actions ───────────────────────────────────────────
         self.successful_steps_label.setText(f"Actions OK: {successful_steps}")
@@ -243,20 +220,14 @@ class StatsDashboard(QWidget):
         # ── AI performance ────────────────────────────────────
         self.ai_calls_label.setText(f"AI Calls: {ai_calls}")
         if avg_ai_response_time_ms > 0:
-            self.ai_response_time_label.setText(f"Avg Response: {avg_ai_response_time_ms/1000:.1f}s")
+            self.ai_response_time_label.setText(
+                f"Avg Response: {avg_ai_response_time_ms / 1000:.1f}s"
+            )
         else:
             self.ai_response_time_label.setText("Avg Response: —")
 
-        # ── Screens ───────────────────────────────────────────
-        self.unique_screens_label.setText(f"Unique Screens: {unique_screens}")
-        if screens_per_minute > 0:
-            self.screens_per_min_label.setText(f"Screens/min: {screens_per_minute:.1f}")
-        else:
-            self.screens_per_min_label.setText("Screens/min: —")
-
         # ── Duration ─────────────────────────────────────────
         self.duration_label.setText(f"Elapsed: {duration_seconds:.0f}s")
-        self.time_progress_bar.setValue(min(int(duration_seconds), self._max_duration_seconds))
 
         self.stats_updated.emit()
 
@@ -264,12 +235,7 @@ class StatsDashboard(QWidget):
         """Reset all statistics to initial state."""
         self.placeholder_label.setVisible(True)
         self.stats_content.setVisible(False)
-        self.update_stats(
-            total_steps=0,
-            successful_steps=0,
-            failed_steps=0,
-            duration_seconds=0.0,
-        )
+        self.update_stats(total_steps=0, successful_steps=0, failed_steps=0, duration_seconds=0.0)
 
     def get_total_steps(self) -> int:
         text = self.total_steps_label.text()

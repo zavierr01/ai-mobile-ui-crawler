@@ -95,7 +95,7 @@ class DroidRunAgentService:
         self._log_handler = None
         self._is_initialized = False
 
-    def _get_droidrun_config(self) -> Dict[str, Any]:
+    def _get_droidrun_config(self, max_steps: int = 15) -> Dict[str, Any]:
         """Convert crawler configuration to DroidRun format.
 
         Returns:
@@ -131,7 +131,7 @@ class DroidRunAgentService:
 
         config = {
             'agent': {
-                'max_steps': self.config_manager.get('max_crawl_steps', 15),
+                'max_steps': max_steps,
                 'reasoning': self.config_manager.get('droidrun_reasoning_mode', True),
                 'streaming': self.config_manager.get('droidrun_streaming', False),
             },
@@ -236,7 +236,7 @@ class DroidRunAgentService:
             droid_logger.removeHandler(self._log_handler)
             self._log_handler = None
 
-    async def _initialize_agent(self) -> None:
+    async def _initialize_agent(self, max_steps: int = 15) -> None:
         """Initialize DroidRun agent with current configuration."""
         if self._is_initialized:
             return
@@ -247,7 +247,7 @@ class DroidRunAgentService:
             from droidrun.config_manager.config_manager import DroidConfig
 
             # Create DroidRun configuration
-            config_dict = self._get_droidrun_config()
+            config_dict = self._get_droidrun_config(max_steps)
             self._droidrun_config = DroidConfig.from_dict(config_dict)
 
             self._is_initialized = True
@@ -283,6 +283,15 @@ class DroidRunAgentService:
                 f"registration, login, main features, and settings."
             )
 
+        # Force continuous exploration by disabling self-termination
+        description += (
+            "\n\nCRITICAL INSTRUCTION: You are running in continuous exploration mode. "
+            "You MUST NEVER use the <request_accomplished> or <answer> tags to end the session early. "
+            "Do not stop even if you think you have fully explored the app or completed the objective. "
+            "Instead, keep exploring new screens, revisiting areas with different inputs, or checking edge cases. "
+            "The system runtime will terminate you automatically when the configured time or step limit is reached."
+        )
+
         return DroidRunGoal(
             description=description,
             max_steps=max_steps,
@@ -295,7 +304,8 @@ class DroidRunAgentService:
         run_id: int,
         app_package: str,
         max_steps: int = 15,
-        exploration_objective: Optional[str] = None
+        exploration_objective: Optional[str] = None,
+        max_duration_seconds: Optional[int] = None
     ) -> DroidRunResult:
         """Execute an app exploration task using DroidRun agent.
 
@@ -304,6 +314,7 @@ class DroidRunAgentService:
             app_package: Target app package name
             max_steps: Maximum steps to execute
             exploration_objective: Optional specific exploration objective
+            max_duration_seconds: Optional maximum duration in seconds
 
         Returns:
             DroidRunResult with execution details
@@ -318,7 +329,7 @@ class DroidRunAgentService:
         for attempt in range(max_crash_retries + 1):
             try:
                 # Initialize agent if needed
-                await self._initialize_agent()
+                await self._initialize_agent(max_steps)
 
                 # Create exploration goal
                 goal = self._create_exploration_goal(app_package, max_steps, exploration_objective)
@@ -342,12 +353,36 @@ class DroidRunAgentService:
                 except Exception:
                     WorkflowHandler = None
 
+                is_timeout = False
+
                 if WorkflowHandler and isinstance(result, WorkflowHandler):
                     self._current_handler = result
                     self._handler_loop = asyncio.get_running_loop()
-                    result = await result
+                    if max_duration_seconds is not None:
+                        try:
+                            result = await asyncio.wait_for(result, timeout=max_duration_seconds)
+                        except asyncio.TimeoutError:
+                            is_timeout = True
+                            logger.info(f"Max duration of {max_duration_seconds}s reached. Stopping DroidRun agent.")
+                            await self._shutdown_active_workflow()
+                    else:
+                        result = await result
                 else:
-                    result = await result
+                    if max_duration_seconds is not None:
+                        task = asyncio.create_task(result)
+                        try:
+                            result = await asyncio.wait_for(task, timeout=max_duration_seconds)
+                        except asyncio.TimeoutError:
+                            is_timeout = True
+                            logger.info(f"Max duration of {max_duration_seconds}s reached. Stopping DroidRun agent.")
+                            if not task.done():
+                                task.cancel()
+                                try:
+                                    await task
+                                except asyncio.CancelledError:
+                                    pass
+                    else:
+                        result = await result
 
                 duration_ms = (time.time() - start_time) * 1000
 
@@ -355,7 +390,10 @@ class DroidRunAgentService:
                 success = False
                 steps_completed = 0
                 error_message = None
-                if hasattr(result, "success"):
+                
+                if is_timeout:
+                    success = True
+                elif hasattr(result, "success"):
                     raw_success = bool(getattr(result, "success"))
                     steps_completed = int(getattr(result, "steps", 0) or 0)
                     reason = str(getattr(result, "reason", ""))
@@ -383,6 +421,9 @@ class DroidRunAgentService:
                     if hasattr(shared_state, 'action_outcomes'):
                         action_outcomes = shared_state.action_outcomes or []
 
+                if is_timeout and not steps_completed:
+                    steps_completed = len(action_outcomes)
+
                 # Count successful vs failed actions
                 successful_count = sum(1 for outcome in action_outcomes if outcome is True)
                 failed_count = sum(1 for outcome in action_outcomes if outcome is False)
@@ -400,10 +441,21 @@ class DroidRunAgentService:
                     total_duration_ms=duration_ms
                 )
 
-                # Log successful interaction
-                self._log_agent_interaction(run_id, goal, result, None)
+                # Log successful interaction (simulate result for timeout)
+                log_result = result if not is_timeout else {
+                    "success": success, 
+                    "steps_completed": steps_completed,
+                    "actions_taken": actions_taken,
+                    "final_state": droid_result.final_state
+                }
+                self._log_agent_interaction(run_id, goal, log_result, None)
 
-                logger.info(f"DroidRun agent completed: {droid_result.steps_completed} steps in {duration_ms:.1f}ms")
+                if is_timeout:
+                    # Clear error message and override reason
+                    error_msg_log = "Duration limit reached"
+                    logger.info(f"DroidRun agent timed out cleanly: {droid_result.steps_completed} steps in {duration_ms:.1f}ms")
+                else:
+                    logger.info(f"DroidRun agent completed: {droid_result.steps_completed} steps in {duration_ms:.1f}ms")
                 return droid_result
 
             except Exception as e:
@@ -685,6 +737,7 @@ class DroidRunAgentService:
                     if hasattr(async_client, 'aclose'):
                         await async_client.aclose()
                         logger.debug(f"Closed google.genai.AsyncClient for {attr_name}")
+                        return  # Skip calling the sync close method which creates orphaned coroutines
 
                 # Then, close the sync client (this is synchronous, no await needed)
                 if hasattr(client, 'close'):
@@ -706,8 +759,13 @@ class DroidRunAgentService:
                     await asyncio.wait_for(handler, timeout=5)
                 except asyncio.TimeoutError:
                     logger.warning("Timed out waiting for DroidRun workflow to finish")
+                except asyncio.CancelledError:
+                    # Ignore cancellation error that is expected when waiting for a cancelled task
+                    pass
             if handler.ctx and handler.ctx.is_running:
                 await handler.ctx.shutdown()
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             logger.warning(f"Error while shutting down DroidRun workflow: {e}")
         finally:

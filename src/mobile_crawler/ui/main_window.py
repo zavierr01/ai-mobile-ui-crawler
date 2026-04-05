@@ -369,6 +369,8 @@ class MainWindow(QMainWindow):
                 self.stats_dashboard.reset()
                 self.stats_dashboard.set_max_steps(self.settings_panel.get_max_steps())
                 self.stats_dashboard.set_max_duration(self.settings_panel.get_max_duration())
+                if hasattr(self.settings_panel, 'get_limit_mode'):
+                    self.stats_dashboard.set_progress_mode(self.settings_panel.get_limit_mode())
             
             # Create crawler loop
             crawler_loop = self._create_crawler_loop(config_manager, run)
@@ -614,35 +616,72 @@ class MainWindow(QMainWindow):
             self._parse_droidrun_progress(run_id, message)
 
     def _parse_droidrun_progress(self, run_id: int, message: str) -> None:
-        """Parse DroidRun log/stdout messages to update live statistics.
+        """Parse DroidRun stdout/log messages to update all live statistics.
 
-        Extracts:
-        - Step N/M patterns for step progress bar
-        - Action type from executor JSON response lines
+        DroidRun doesn't emit our custom signals (on_action_executed, on_ai_response_received,
+        on_screen_processed) — it's a black box. We mine its stdout lines instead.
+
+        Patterns tracked:
+        - "Step N/M"              → step counter + progress bar + new screen visit
+        - "Manager response:"     → +1 AI call (manager LLM)
+        - "Executor response:"    → +1 AI call + extract action type + +1 action
+        - "AppOpener response:"   → +1 AI call (app launcher LLM)
+        - '{"action": "..."}' JSON → action type for Last Action label
         """
         if not self._current_stats:
             return
 
-        # Match "Step N/M" (with optional emoji prefix like 🔄)
-        match = re.search(r'Step\s+(\d+)\s*/\s*(\d+)', message)
-        if match:
-            current_step = int(match.group(1))
-            max_step = int(match.group(2))
-            if current_step > self._current_stats.last_step_number:
-                self._current_stats.total_steps = current_step
-                self._current_stats.last_step_number = current_step
-                self._current_stats.current_step_of_max = f"{current_step} / {max_step}"
-                self._update_dashboard_stats()
-            return
+        stats = self._current_stats
+        updated = False
 
-        # Parse last action type from DroidRun executor JSON responses.
-        # Executor replies look like: {"action": "click", ...} or {"action":"swipe", ...}
+        # ── Step N/M: step progress + screen visit ────────────────────────
+        step_match = re.search(r'Step\s+(\d+)\s*/\s*(\d+)', message)
+        if step_match:
+            current_step = int(step_match.group(1))
+            max_step = int(step_match.group(2))
+            if current_step > stats.last_step_number:
+                stats.total_steps = current_step
+                stats.last_step_number = current_step
+                stats.current_step_of_max = f"{current_step} / {max_step}"
+                updated = True
+            if updated:
+                self._update_dashboard_stats()
+            return  # Step lines don't need further parsing
+
+        # ── AI call detection from DroidRun role response headers ─────────
+        # DroidRun prints these to stdout for each LLM call it makes:
+        #   "📋  Manager response:"  – manager LLM deciding the plan
+        #   "Executor response:"     – executor LLM choosing the action
+        #   "📱  AppOpener response:" – app-opener LLM identifying the package
+        AI_MARKERS = (
+            "Manager response:",
+            "Executor response:",
+            "AppOpener response:",
+        )
+        if any(marker in message for marker in AI_MARKERS):
+            stats.ai_call_count += 1
+            updated = True
+
+            # Executor response lines also mean: 1 action is about to execute
+            if "Executor response:" in message:
+                # Count as 1 successful action (optimistic; overridden by final
+                # accurate counts from on_crawl_completed_stats at the end)
+                stats.successful_actions += 1
+
+        # ── Last action type from executor JSON payload ────────────────────
+        # Executor responses include inline JSON blocks like:
+        #   {"action": "click", "index": 64}
+        #   {"action": "swipe", "coordinate": [...], ...}
         action_match = re.search(r'"action"\s*:\s*"([^"]+)"', message)
         if action_match:
             action_type = action_match.group(1)
-            if action_type and action_type != self._current_stats.last_action_type:
-                self._current_stats.last_action_type = action_type
-                self._update_dashboard_stats()
+            if action_type and action_type != stats.last_action_type:
+                stats.last_action_type = action_type
+                updated = True
+
+        if updated:
+            self._update_dashboard_stats()
+
 
     def _pause_crawl(self) -> None:
         """Pause the current crawl."""
@@ -1341,7 +1380,13 @@ class MainWindow(QMainWindow):
             return
         
         stats = self._current_stats
-        
+
+        # Compute avg AI response: use per-call data when available (old crawler),
+        # otherwise fall back to elapsed_time / call_count (DroidRun mode).
+        avg_ai_ms = stats.avg_ai_response_time()
+        if avg_ai_ms == 0.0 and stats.ai_call_count > 0:
+            avg_ai_ms = stats.elapsed_seconds() * 1000 / stats.ai_call_count
+
         self.stats_dashboard.update_stats(
             total_steps=stats.total_steps,
             successful_steps=stats.successful_actions,
@@ -1350,7 +1395,7 @@ class MainWindow(QMainWindow):
             total_visits=stats.total_screen_visits,
             screens_per_minute=stats.screens_per_minute(),
             ai_calls=stats.ai_call_count,
-            avg_ai_response_time_ms=stats.avg_ai_response_time(),
+            avg_ai_response_time_ms=avg_ai_ms,
             duration_seconds=stats.elapsed_seconds(),
             action_avg_ms=stats.avg_action_time_ms(),
             ocr_avg_ms=stats.avg_ocr_time_ms(),

@@ -160,6 +160,15 @@ class CrawlerLoop:
             )
 
             exploration_objective = self.config_manager.get("exploration_objective", None)
+            
+            limit_type = self.config_manager.get("limit_type", "steps")
+            max_steps = self.config_manager.get("max_steps", self.config_manager.get("max_crawl_steps", 15))
+            max_duration = self.config_manager.get("max_duration_seconds", self.config_manager.get("max_crawl_duration_seconds", 300))
+            
+            if limit_type == "duration":
+                actual_max_steps = 9999
+            else:
+                actual_max_steps = max_steps
 
             # Run both execute and cleanup in the same event loop to ensure proper
             # cleanup of async resources (e.g., google.genai.AsyncClient instances)
@@ -168,8 +177,9 @@ class CrawlerLoop:
                     return await self._droidrun_agent_service.execute_exploration_task(
                         run_id=run_id,
                         app_package=run.app_package,
-                        max_steps=self.config_manager.get("max_crawl_steps", 15),
-                        exploration_objective=exploration_objective
+                        max_steps=actual_max_steps,
+                        exploration_objective=exploration_objective,
+                        max_duration_seconds=max_duration if limit_type == "duration" else None
                     )
                 finally:
                     # Always cleanup, even if execute fails
