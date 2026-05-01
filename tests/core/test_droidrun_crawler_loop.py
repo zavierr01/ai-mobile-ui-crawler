@@ -3,7 +3,10 @@
 import asyncio
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
 from mobile_crawler.core.crawler_loop import CrawlerLoop
+from mobile_crawler.domain.errors import ErrorContext, RecorderError
 
 
 class TestListener:
@@ -65,3 +68,40 @@ def test_droidrun_wrapper_happy_path():
     assert ("started", 1, "com.example.app") in listener.events
     assert any(e[0] == "completed" for e in listener.events)
     run_repo.update_run_stats.assert_called_once()
+
+
+class FailingRecorderListener(TestListener):
+    def on_crawl_completed(self, run_id, total_steps, duration_ms, reason, ocr_avg_ms=0.0):
+        raise RecorderError(
+            "DB write failed",
+            context=ErrorContext(run_id=run_id),
+        )
+
+    def on_state_changed(self, run_id, old_state, new_state):
+        self.events.append(("state", run_id, old_state, new_state))
+
+
+def test_emit_event_propagates_recorder_error():
+    loop = CrawlerLoop(
+        config_manager=Mock(),
+        run_repository=Mock(),
+        session_folder_manager=Mock(),
+        event_listeners=[FailingRecorderListener()],
+    )
+    with pytest.raises(RecorderError):
+        loop._emit_event("on_crawl_completed", 1, 5, 1000.0, "done", 0.0)
+
+
+def test_emit_event_continues_on_non_critical_error():
+    class FlakyListener(TestListener):
+        def on_debug_log(self, run_id, step_number, message):
+            raise RuntimeError("UI widget broke")
+
+    loop = CrawlerLoop(
+        config_manager=Mock(),
+        run_repository=Mock(),
+        session_folder_manager=Mock(),
+        event_listeners=[FlakyListener()],
+    )
+    # Should not raise — non-critical listener failures are logged and swallowed
+    loop._emit_event("on_debug_log", 1, 0, "test message")
