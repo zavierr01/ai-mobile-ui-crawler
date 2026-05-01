@@ -6,84 +6,78 @@ from typing import Dict, Any
 # These are used when no other source provides a value
 DEFAULTS: Dict[str, Any] = {
     # Crawl settings
-    'max_crawl_steps': 15,
-    'max_crawl_duration_seconds': 600,
-    'action_delay_ms': 500,
-
+    "max_crawl_steps": 15,
+    "max_crawl_duration_seconds": 600,
+    "action_delay_ms": 500,
     # AI settings
-    'ai_timeout_seconds': 30,
-    'ai_retry_count': 2,
-
+    "ai_timeout_seconds": 30,
+    "ai_retry_count": 2,
     # Logging
-    'log_level': 'INFO',
-    'log_to_file': True,
-    'log_to_database': True,
-
+    "log_level": "INFO",
+    "log_to_file": True,
+    "log_to_database": True,
     # Screenshot settings
-    'screenshot_max_width': 1280,
-    'screenshot_format': 'PNG',
-
+    "screenshot_max_width": 1280,
+    "screenshot_format": "PNG",
     # Session settings
-    'session_cleanup_on_start': True,
-
+    "session_cleanup_on_start": True,
     # UI settings (for GUI)
-    'theme': 'system',
-    'window_width': 1200,
-    'window_height': 800,
-
+    "theme": "system",
+    "window_width": 1200,
+    "window_height": 800,
     # Security
-    'encrypt_api_keys': True,
-
+    "encrypt_api_keys": True,
     # Screen deduplication settings
-    'screen_similarity_threshold': 12,  # Hamming distance threshold for dHash (64-bit)
-    'use_perceptual_hashing': True,     # Enable perceptual hashing for screen deduplication
-
+    "screen_similarity_threshold": 12,  # Hamming distance threshold for dHash (64-bit)
+    "use_perceptual_hashing": True,  # Enable perceptual hashing for screen deduplication
     # Traffic capture settings (PCAPdroid)
     # Enable network traffic capture using PCAPdroid Android app
-    'enable_traffic_capture': False,
+    "enable_traffic_capture": False,
     # PCAPdroid package name (default: official package from F-Droid)
-    'pcapdroid_package': 'com.emanuelef.remote_capture',
+    "pcapdroid_package": "com.emanuelef.remote_capture",
     # PCAPdroid activity (auto-constructed as {package}/.activities.CaptureCtrl if None)
-    'pcapdroid_activity': None,
+    "pcapdroid_activity": None,
     # Optional API key for PCAPdroid (recommended to avoid user consent prompts)
-    'pcapdroid_api_key': None,
+    "pcapdroid_api_key": None,
     # Output directory for PCAP files (resolved to session directory at runtime)
-    'traffic_capture_output_dir': None,
+    "traffic_capture_output_dir": None,
     # Default PCAPdroid output directory on device
-    'device_pcap_dir': '/sdcard/Download/PCAPdroid',
-
+    "device_pcap_dir": "/sdcard/Download/PCAPdroid",
     # Video recording settings
     # Enable screen recording during crawl sessions (saved to session directory)
-    'enable_video_recording': False,
-
+    "enable_video_recording": False,
     # MobSF static analysis settings
     # Enable MobSF static security analysis after crawl completion
-    'enable_mobsf_analysis': False,
+    "enable_mobsf_analysis": False,
     # MobSF server API URL (must be running and accessible)
-    'mobsf_api_url': 'http://localhost:8000',
+    "mobsf_api_url": "http://localhost:8000",
     # MobSF API key (required for API access)
-    'mobsf_api_key': None,
+    "mobsf_api_key": None,
     # Maximum time to wait for scan completion (in seconds)
-    'mobsf_scan_timeout': 900,  # 15 minutes (scans can take 5-10+ minutes for complex apps)
+    "mobsf_scan_timeout": 900,  # 15 minutes (scans can take 5-10+ minutes for complex apps)
     # Interval between scan status polls (in seconds)
-    'mobsf_poll_interval': 2,
+    "mobsf_poll_interval": 2,
     # HTTP request timeout for MobSF API calls (in seconds)
-    'mobsf_request_timeout': 300,  # 5 minutes for large report downloads
+    "mobsf_request_timeout": 300,  # 5 minutes for large report downloads
     # Test credentials
-
     # DroidRun Agent Integration settings
     # Enable DroidRun's advanced AI agent system for multi-step planning
-    'use_droidrun_agent': True,
+    "use_droidrun_agent": True,
     # Use reasoning mode for complex planning (vs direct execution)
-    'droidrun_reasoning_mode': True,
+    "droidrun_reasoning_mode": True,
     # Maximum planning/execution cycles for DroidRun agent
-    'droidrun_max_cycles': 5,
+    "droidrun_max_cycles": 5,
     # Agent streaming output (for real-time updates)
-    'droidrun_streaming': False,
+    "droidrun_streaming": False,
     # DroidRun agent retry count for failed operations
-    'droidrun_retry_count': 2,
-    # Use ADB for device actions (recommended with DroidRun)
-    'use_adb_actions': True,
+    "droidrun_retry_count": 2,
     # DroidRun telemetry and monitoring
-    'droidrun_telemetry_enabled': False,
+    "droidrun_telemetry_enabled": False,
+    # OmniParser settings
+    "ui_parser_mode": "omniparser",
+    "omniparser_backend": "replicate",
+    "omniparser_local_url": "http://localhost:8000",
+    "omniparser_box_threshold": 0.05,
+    "omniparser_cache_ttl_days": 30,
+    "omniparser_a11y_ratio_threshold": 0.5,
 }

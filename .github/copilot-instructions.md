@@ -1,4 +1,4 @@
-﻿---
+---
 
 ### Copilot Code Editing Guidelines
 
@@ -31,9 +31,9 @@
 
 ---
 
-### Project-specific rules: appium-traverser-master-arbeit
+### Project-specific rules: mobile-crawler
 
-Use these concrete rules when editing this repo so changes align with the crawler’s contracts and runtime behavior.
+Use these concrete rules when editing this repo so changes align with the crawler's contracts and runtime behavior.
 
 - Keep stdout prefixes stable: `UI_STATUS:`, `UI_STEP:`, `UI_ACTION:`, `UI_SCREENSHOT:`, `UI_ANNOTATED_SCREENSHOT:`, `UI_FOCUS:`, `UI_END:`. Do not rename or reformat; external UIs parse these.
 - AI JSON output contract (see `traverser_ai_api/agent_assistant.py`):
@@ -57,7 +57,6 @@ Use these concrete rules when editing this repo so changes align with the crawle
    - Long press maps to a tap-and-hold at element/bbox center; default duration from `LONG_PRESS_MIN_DURATION_MS`.
    - Input flow must verify focus before typing; if native send_keys fails, ADB text fallback is controlled by `USE_ADB_INPUT_FALLBACK`.
    - Before non-input actions, hide keyboard when `AUTO_HIDE_KEYBOARD_BEFORE_NON_INPUT` is True. Respect toast overlays; wait up to `TOAST_DISMISS_WAIT_MS`.
-- Tap safety (see `appium_driver.py`): honor `SAFE_TAP_MARGIN_RATIO` and `SAFE_TAP_EDGE_HANDLING` (`snap` or `reject`) when computing coordinate taps.
 - Loop/no-op control (see `crawler.py`):
    - After `MAX_CONSECUTIVE_NO_OP_FAILURES`, select next from `FALLBACK_ACTIONS_SEQUENCE`.
    - Limit repeats per screen via `MAX_SAME_ACTION_REPEAT`; set `last_action_feedback_for_ai` to force different actions.
@@ -69,30 +68,9 @@ Use these concrete rules when editing this repo so changes align with the crawle
 - Maintain adapter boundaries: implement model-specific logic inside `model_adapters.py`; keep `AgentAssistant` provider-agnostic.
 - Tests/docs: when changing public behavior, add a brief note in README or docs and, if feasible, a minimal test harness under `tests/` replicating the JSON contract and mapping edge cases.
 
----
-
-### External MCP Client Integration (001-external-mcp-client)
-
-**Technology Stack Additions:**
-- Python 3.8+ with HTTP client (requests library)
-- External MCP server communication (JSON-RPC 2.0 over HTTP)
-- AppiumDriver compatibility adapter pattern
-
-**Key Integration Points:**
-- `traverser_ai_api/mcp_client.py`: HTTP-based MCP client for external server communication
-- `traverser_ai_api/mcp_appium_adapter.py`: AppiumDriver-compatible interface using MCP client
-- Configuration: `MCP_SERVER_URL`, `MCP_CONNECTION_TIMEOUT`, `MCP_REQUEST_TIMEOUT`, `MCP_MAX_RETRIES`
-
-**Architecture Changes:**
-- Removed internal MCP server (`mcp_server.py`)
-- All mobile automation now routes through external MCP server
-- Maintains backward compatibility with existing AppiumDriver interface
-- HTTP-based communication replaces direct MCP SDK usage
-
-**Development Guidelines:**
-- Use MCP client for all mobile automation operations
-- Handle connection failures gracefully with retry logic
-- Maintain JSON-RPC 2.0 protocol compliance
-- Test against external MCP server for integration validation
 
 
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->

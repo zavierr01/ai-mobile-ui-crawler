@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QTabWidget,
     QScrollArea,
+    QComboBox,
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
 class SettingsPanel(QWidget):
     """Widget for configuring crawler settings.
-    
+
     Provides inputs for API keys, system prompt, crawl limits,
     and test credentials. Saves to user_config.db.
     """
@@ -38,7 +39,7 @@ class SettingsPanel(QWidget):
 
     def __init__(self, config_store: "UserConfigStore", parent=None):
         """Initialize settings panel widget.
-        
+
         Args:
             config_store: UserConfigStore instance for saving/loading settings
             parent: Parent widget
@@ -51,25 +52,25 @@ class SettingsPanel(QWidget):
     def _setup_ui(self):
         """Set up user interface."""
         main_layout = QVBoxLayout(self)
-        
+
         # Main Tab Widget
         self.tab_widget = QTabWidget()
-        
+
         # 1. General Tab (Limits, Screen Config)
         self.tab_widget.addTab(self._setup_general_tab(), "General")
-        
+
         # 2. AI Settings Tab (API Keys, System Prompt)
         self.tab_widget.addTab(self._setup_ai_tab(), "AI Settings")
-        
+
         # 3. Integrations Tab (Traffic, Video, MobSF)
         self.tab_widget.addTab(self._setup_integrations_tab(), "Integrations")
-        
+
         # 4. DroidRun Agent Tab (AI Agent Settings)
         self.tab_widget.addTab(self._setup_droidrun_tab(), "DroidRun Agent")
 
         # 5. Credentials Tab (Test Credentials)
         self.tab_widget.addTab(self._setup_credentials_tab(), "Credentials")
-        
+
         main_layout.addWidget(self.tab_widget)
 
         # Save button in bottom area (stays visible regardless of tab)
@@ -86,14 +87,14 @@ class SettingsPanel(QWidget):
         """Create the General settings tab."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        
+
         # Group box for Crawl Limits
         limits_group = QGroupBox("Crawl Limits")
         limits_layout = QVBoxLayout()
 
         # Radio buttons for limit type selection
         self.limit_button_group = QButtonGroup(self)
-        
+
         # Max Steps option
         max_steps_layout = QHBoxLayout()
         self.steps_radio = QRadioButton()
@@ -140,14 +141,16 @@ class SettingsPanel(QWidget):
         self.top_bar_height_input = QSpinBox()
         self.top_bar_height_input.setRange(0, 500)
         self.top_bar_height_input.setValue(0)
-        self.top_bar_height_input.setToolTip("Exclude the Android status bar from OCR and AI analysis. Typically 80-120px.")
+        self.top_bar_height_input.setToolTip(
+            "Exclude the Android status bar from OCR and AI analysis. Typically 80-120px."
+        )
         top_bar_layout.addWidget(self.top_bar_height_input)
         top_bar_layout.addStretch()
         screen_layout.addLayout(top_bar_layout)
 
         screen_group.setLayout(screen_layout)
         layout.addWidget(screen_group)
-        
+
         layout.addStretch()
         return self._wrap_in_scroll_area(tab)
 
@@ -155,7 +158,7 @@ class SettingsPanel(QWidget):
         """Create the AI Settings tab."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        
+
         # Group box for API Keys
         api_keys_group = QGroupBox("API Keys")
         api_keys_layout = QVBoxLayout()
@@ -183,31 +186,20 @@ class SettingsPanel(QWidget):
         api_keys_group.setLayout(api_keys_layout)
         layout.addWidget(api_keys_group)
 
-        # Group box for System Prompt
-        prompt_group = QGroupBox("System Prompt")
-        prompt_layout = QVBoxLayout()
-        prompt_label = QLabel("Custom System Prompt:")
-        prompt_layout.addWidget(prompt_label)
-        self.system_prompt_input = QTextEdit()
-        self.system_prompt_input.setPlaceholderText("Enter custom system prompt (leave empty to use default)")
-        prompt_layout.addWidget(self.system_prompt_input)
-        prompt_group.setLayout(prompt_layout)
-        layout.addWidget(prompt_group)
-        
-        layout.addStretch()
+        # layout.addStretch()
         return self._wrap_in_scroll_area(tab)
 
     def _setup_integrations_tab(self) -> QWidget:
         """Create the Integrations tab."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
-        
+
         # Traffic Capture
         traffic_capture_group = QGroupBox("Traffic Capture (PCAPdroid)")
         traffic_capture_layout = QVBoxLayout()
         self.enable_traffic_capture_checkbox = QCheckBox("Enable Traffic Capture")
         traffic_capture_layout.addWidget(self.enable_traffic_capture_checkbox)
-        
+
         pcap_key_layout = QHBoxLayout()
         pcap_key_label = QLabel("API Key:")
         pcap_key_layout.addWidget(pcap_key_label)
@@ -216,7 +208,7 @@ class SettingsPanel(QWidget):
         self.pcapdroid_api_key_input.setEnabled(False)
         pcap_key_layout.addWidget(self.pcapdroid_api_key_input)
         traffic_capture_layout.addLayout(pcap_key_layout)
-        
+
         self.enable_traffic_capture_checkbox.toggled.connect(self._on_traffic_capture_toggled)
         traffic_capture_group.setLayout(traffic_capture_layout)
         layout.addWidget(traffic_capture_group)
@@ -234,7 +226,7 @@ class SettingsPanel(QWidget):
         mobsf_layout = QVBoxLayout()
         self.enable_mobsf_analysis_checkbox = QCheckBox("Enable MobSF Analysis")
         mobsf_layout.addWidget(self.enable_mobsf_analysis_checkbox)
-        
+
         mobsf_url_layout = QHBoxLayout()
         mobsf_url_layout.addWidget(QLabel("API URL:"))
         self.mobsf_api_url_input = QLineEdit()
@@ -242,7 +234,7 @@ class SettingsPanel(QWidget):
         self.mobsf_api_url_input.setEnabled(False)
         mobsf_url_layout.addWidget(self.mobsf_api_url_input)
         mobsf_layout.addLayout(mobsf_url_layout)
-        
+
         mobsf_key_layout = QHBoxLayout()
         mobsf_key_layout.addWidget(QLabel("API Key:"))
         self.mobsf_api_key_input = QLineEdit()
@@ -250,11 +242,11 @@ class SettingsPanel(QWidget):
         self.mobsf_api_key_input.setEnabled(False)
         mobsf_key_layout.addWidget(self.mobsf_api_key_input)
         mobsf_layout.addLayout(mobsf_key_layout)
-        
+
         self.enable_mobsf_analysis_checkbox.toggled.connect(self._on_mobsf_toggled)
         mobsf_group.setLayout(mobsf_layout)
         layout.addWidget(mobsf_group)
-        
+
         layout.addStretch()
         return self._wrap_in_scroll_area(tab)
 
@@ -299,9 +291,7 @@ class SettingsPanel(QWidget):
 
         # Enable streaming checkbox
         self.droidrun_streaming_checkbox = QCheckBox("Enable Streaming Output")
-        self.droidrun_streaming_checkbox.setToolTip(
-            "Show real-time agent planning and execution updates"
-        )
+        self.droidrun_streaming_checkbox.setToolTip("Show real-time agent planning and execution updates")
         droidrun_layout.addWidget(self.droidrun_streaming_checkbox)
 
         # Agent retry count
@@ -325,22 +315,47 @@ class SettingsPanel(QWidget):
         action_layout.setSpacing(12)
         action_layout.setContentsMargins(15, 20, 15, 20)
 
-        # Use ADB actions checkbox
-        self.use_adb_actions_checkbox = QCheckBox("Use ADB for Actions (Recommended)")
-        self.use_adb_actions_checkbox.setToolTip(
-            "Use ADB commands for device actions"
-        )
-        action_layout.addWidget(self.use_adb_actions_checkbox)
-
         # Telemetry checkbox
         self.droidrun_telemetry_checkbox = QCheckBox("Enable DroidRun Telemetry")
-        self.droidrun_telemetry_checkbox.setToolTip(
-            "Enable DroidRun's built-in monitoring and tracing"
-        )
+        self.droidrun_telemetry_checkbox.setToolTip("Enable DroidRun's built-in monitoring and tracing")
         action_layout.addWidget(self.droidrun_telemetry_checkbox)
 
         action_group.setLayout(action_layout)
         layout.addWidget(action_group)
+
+        # UI Parser group
+        parser_group = QGroupBox("UI Parser")
+        parser_layout = QVBoxLayout()
+        parser_layout.setSpacing(12)
+        parser_layout.setContentsMargins(15, 20, 15, 20)
+
+        # UI Parser mode selector
+        parser_mode_layout = QHBoxLayout()
+        parser_mode_label = QLabel("Parser Mode:")
+        parser_mode_layout.addWidget(parser_mode_label)
+        self.ui_parser_mode_combo = QComboBox()
+        self.ui_parser_mode_combo.addItems(["boost", "omniparser", "accessibility"])
+        self.ui_parser_mode_combo.setCurrentText("omniparser")
+        self.ui_parser_mode_combo.setToolTip(
+            "UI parser mode: 'omniparser' (vision-based, recommended), 'boost' (auto), or 'accessibility' (legacy)"
+        )
+        parser_mode_layout.addWidget(self.ui_parser_mode_combo)
+        parser_mode_layout.addStretch()
+        parser_layout.addLayout(parser_mode_layout)
+
+        # Replicate API Key
+        replicate_layout = QHBoxLayout()
+        replicate_label = QLabel("Replicate API Key:")
+        replicate_layout.addWidget(replicate_label)
+        self.replicate_api_key_input = QLineEdit()
+        self.replicate_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.replicate_api_key_input.setPlaceholderText("Enter Replicate API key for OmniParser")
+        self.replicate_api_key_input.setToolTip("API key for Replicate (used by OmniParser vision model)")
+        replicate_layout.addWidget(self.replicate_api_key_input)
+        parser_layout.addLayout(replicate_layout)
+
+        parser_group.setLayout(parser_layout)
+        layout.addWidget(parser_group)
 
         # Exploration Objective group
         objective_group = QGroupBox("Exploration Objective / Prompt")
@@ -368,7 +383,6 @@ class SettingsPanel(QWidget):
             self.droidrun_max_cycles_input.setEnabled(enabled)
             self.droidrun_streaming_checkbox.setEnabled(enabled)
             self.droidrun_retry_count_input.setEnabled(enabled)
-            self.use_adb_actions_checkbox.setEnabled(enabled)
             self.droidrun_telemetry_checkbox.setEnabled(enabled)
 
         self.enable_droidrun_checkbox.toggled.connect(on_droidrun_enabled_changed)
@@ -384,7 +398,7 @@ class SettingsPanel(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         layout.setSpacing(15)  # Increased vertical spacing between group boxes
-        
+
         # Test Credentials group
         credentials_group = QGroupBox("App & Service Credentials")
         # Use form-like layout with more spacing
@@ -410,35 +424,36 @@ class SettingsPanel(QWidget):
         # Username
         l, self.test_username_input = create_field("Test Username:", "Enter test username")
         credentials_layout.addLayout(l)
-        
+
         # Password
         l, self.test_password_input = create_field("Test Password:", "Enter test password", True)
         credentials_layout.addLayout(l)
-        
+
         # Email
         l, self.test_email_input = create_field("Test Email:", "e.g. user@abc12345.mailosaur.net")
         credentials_layout.addLayout(l)
-        
+
         # Mailosaur section
         mailosaur_label = QLabel("Mailosaur Integration:")
         mailosaur_label.setStyleSheet("font-weight: bold; margin-top: 10px; color: #555;")
         credentials_layout.addWidget(mailosaur_label)
-        
+
         l, self.mailosaur_api_key_input = create_field("API Key:", "Enter Mailosaur API key", True)
         credentials_layout.addLayout(l)
-        
+
         l, self.mailosaur_server_id_input = create_field("Server ID:", "Enter Mailosaur Server ID")
         credentials_layout.addLayout(l)
 
         credentials_group.setLayout(credentials_layout)
         layout.addWidget(credentials_group)
-        
+
         layout.addStretch()
         return self._wrap_in_scroll_area(tab)
 
     def _wrap_in_scroll_area(self, widget: QWidget) -> QWidget:
         """Wrap a widget in a QScrollArea for handling small screens."""
         from PySide6.QtWidgets import QScrollArea
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(widget)
@@ -447,7 +462,7 @@ class SettingsPanel(QWidget):
 
     def _on_limit_type_changed(self, checked: bool):
         """Handle limit type radio button toggle.
-        
+
         Args:
             checked: Whether steps radio is checked
         """
@@ -462,7 +477,7 @@ class SettingsPanel(QWidget):
 
     def _on_traffic_capture_toggled(self, checked: bool):
         """Handle traffic capture checkbox toggle.
-        
+
         Args:
             checked: Whether traffic capture is enabled
         """
@@ -470,7 +485,7 @@ class SettingsPanel(QWidget):
 
     def _on_mobsf_toggled(self, checked: bool):
         """Handle MobSF analysis checkbox toggle.
-        
+
         Args:
             checked: Whether MobSF analysis is enabled
         """
@@ -491,10 +506,6 @@ class SettingsPanel(QWidget):
             self.openrouter_api_key_input.setText(openrouter_key)
         else:
             self.openrouter_api_key_input.setText("")  # Clear field if no valid key
-
-        # Load system prompt
-        system_prompt = self._config_store.get_setting("system_prompt", default="")
-        self.system_prompt_input.setPlainText(system_prompt)
 
         # Load crawl limits
         max_steps = self._config_store.get_setting("max_steps", default=100)
@@ -530,7 +541,7 @@ class SettingsPanel(QWidget):
         mailosaur_api_key = self._config_store.get_secret_plaintext("mailosaur_api_key")
         if mailosaur_api_key:
             self.mailosaur_api_key_input.setText(mailosaur_api_key)
-        
+
         mailosaur_server_id = self._config_store.get_setting("mailosaur_server_id") or ""
         self.mailosaur_server_id_input.setText(mailosaur_server_id)
 
@@ -538,7 +549,6 @@ class SettingsPanel(QWidget):
         enable_traffic_capture = self._config_store.get_setting("enable_traffic_capture", default=False)
         self.enable_traffic_capture_checkbox.setChecked(enable_traffic_capture)
         self._on_traffic_capture_toggled(enable_traffic_capture)
-
 
         pcapdroid_api_key = self._config_store.get_secret_plaintext("pcapdroid_api_key")
         if pcapdroid_api_key:
@@ -583,11 +593,16 @@ class SettingsPanel(QWidget):
         droidrun_retry_count = self._config_store.get_setting("droidrun_retry_count", default=2)
         self.droidrun_retry_count_input.setValue(droidrun_retry_count)
 
-        use_adb_actions = self._config_store.get_setting("use_adb_actions", default=True)
-        self.use_adb_actions_checkbox.setChecked(use_adb_actions)
-
         droidrun_telemetry = self._config_store.get_setting("droidrun_telemetry_enabled", default=False)
         self.droidrun_telemetry_checkbox.setChecked(droidrun_telemetry)
+
+        # Load UI parser mode and Replicate API key
+        ui_parser_mode = self._config_store.get_setting("ui_parser_mode", default="omniparser")
+        self.ui_parser_mode_combo.setCurrentText(ui_parser_mode)
+
+        replicate_key = self._config_store.get_setting("replicate_api_key", default="")
+        if replicate_key:
+            self.replicate_api_key_input.setText(replicate_key)
 
         # Load exploration objective (pre-fill with default if not customized)
         exploration_objective = self._config_store.get_setting("exploration_objective", default="")
@@ -602,19 +617,19 @@ class SettingsPanel(QWidget):
 
     def _load_mobsf_api_key_from_file(self) -> str:
         """Load MobSF API key from the startup script's output file.
-        
+
         The startup script (scripts/start.ps1) automatically extracts the
         MobSF REST API key from Docker logs and saves it to .mobsf_api_key.
-        
+
         Returns:
             The API key string, or empty string if not found.
         """
         import os
         import logging
-        
+
         logger = logging.getLogger(__name__)
         api_key_file = ".mobsf_api_key"
-        
+
         try:
             if os.path.exists(api_key_file):
                 with open(api_key_file, "r", encoding="utf-8") as f:
@@ -624,7 +639,7 @@ class SettingsPanel(QWidget):
                         return api_key
         except Exception as e:
             logger.warning(f"Failed to read MobSF API key file: {e}")
-        
+
         return ""
 
     def _on_save_clicked(self):
@@ -656,17 +671,10 @@ class SettingsPanel(QWidget):
             else:
                 self._config_store.delete_secret("openrouter_api_key")
 
-            # Save system prompt
-            system_prompt = self.system_prompt_input.toPlainText().strip()
-            if system_prompt:
-                self._config_store.set_setting("system_prompt", system_prompt, "string")
-            else:
-                self._config_store.delete_setting("system_prompt")
-
             # Save crawl limits
             self._config_store.set_setting("max_steps", self.max_steps_input.value(), "int")
             self._config_store.set_setting("max_duration_seconds", self.max_duration_input.value(), "int")
-            
+
             # Save limit type preference
             limit_type = "steps" if self.steps_radio.isChecked() else "duration"
             self._config_store.set_setting("limit_type", limit_type, "string")
@@ -692,27 +700,26 @@ class SettingsPanel(QWidget):
                 self._config_store.set_setting("test_email", test_email, "string")
             else:
                 self._config_store.delete_setting("test_email")
-            
+
             # Save Mailosaur credentials
             mailosaur_api_key = self.mailosaur_api_key_input.text().strip()
             if mailosaur_api_key:
                 self._config_store.set_secret_plaintext("mailosaur_api_key", mailosaur_api_key)
             else:
                 self._config_store.delete_secret("mailosaur_api_key")
-            
+
             mailosaur_server_id = self.mailosaur_server_id_input.text().strip()
             if mailosaur_server_id:
                 self._config_store.set_setting("mailosaur_server_id", mailosaur_server_id, "string")
             else:
                 self._config_store.delete_setting("mailosaur_server_id")
-            
+
             # Cleanup old config keys
             self._config_store.delete_setting("test_gmail_account")
 
             # Save traffic capture settings
             enable_traffic_capture = self.enable_traffic_capture_checkbox.isChecked()
             self._config_store.set_setting("enable_traffic_capture", enable_traffic_capture, "bool")
-
 
             pcapdroid_api_key = self.pcapdroid_api_key_input.text().strip()
             if pcapdroid_api_key:
@@ -756,11 +763,19 @@ class SettingsPanel(QWidget):
             droidrun_retry_count = self.droidrun_retry_count_input.value()
             self._config_store.set_setting("droidrun_retry_count", droidrun_retry_count, "int")
 
-            use_adb_actions = self.use_adb_actions_checkbox.isChecked()
-            self._config_store.set_setting("use_adb_actions", use_adb_actions, "bool")
-
             droidrun_telemetry = self.droidrun_telemetry_checkbox.isChecked()
             self._config_store.set_setting("droidrun_telemetry_enabled", droidrun_telemetry, "bool")
+
+            # Save UI parser mode
+            ui_parser_mode = self.ui_parser_mode_combo.currentText()
+            self._config_store.set_setting("ui_parser_mode", ui_parser_mode, "string")
+
+            # Save Replicate API key (as regular setting, not secret - for easier debugging)
+            replicate_key = self.replicate_api_key_input.text().strip()
+            if replicate_key:
+                self._config_store.set_setting("replicate_api_key", replicate_key, "string")
+            else:
+                self._config_store.delete_setting("replicate_api_key")
 
             # Save exploration objective
             exploration_objective = self.exploration_objective_input.toPlainText().strip()
@@ -773,23 +788,15 @@ class SettingsPanel(QWidget):
             self.settings_saved.emit()
 
             # Show success message
-            QMessageBox.information(
-                self,
-                "Settings Saved",
-                "All settings have been saved successfully."
-            )
+            QMessageBox.information(self, "Settings Saved", "All settings have been saved successfully.")
 
         except Exception as e:
             # Show error message
-            QMessageBox.critical(
-                self,
-                "Error Saving Settings",
-                f"Failed to save settings: {e}"
-            )
+            QMessageBox.critical(self, "Error Saving Settings", f"Failed to save settings: {e}")
 
     def get_gemini_api_key(self) -> str:
         """Get the current Gemini API key value.
-        
+
         Returns:
             Current Gemini API key
         """
@@ -797,23 +804,15 @@ class SettingsPanel(QWidget):
 
     def get_openrouter_api_key(self) -> str:
         """Get the current OpenRouter API key value.
-        
+
         Returns:
             Current OpenRouter API key
         """
         return self.openrouter_api_key_input.text()
 
-    def get_system_prompt(self) -> str:
-        """Get the current system prompt value.
-        
-        Returns:
-            Current system prompt
-        """
-        return self.system_prompt_input.toPlainText()
-
     def get_max_steps(self) -> int:
         """Get the current max steps value.
-        
+
         Returns:
             Current max steps
         """
@@ -821,7 +820,7 @@ class SettingsPanel(QWidget):
 
     def get_max_duration(self) -> int:
         """Get the current max duration value.
-        
+
         Returns:
             Current max duration in seconds
         """
@@ -829,15 +828,15 @@ class SettingsPanel(QWidget):
 
     def get_limit_mode(self) -> str:
         """Get the current limit mode (steps or duration).
-        
+
         Returns:
             'steps' or 'duration'
         """
-        return 'steps' if self.steps_radio.isChecked() else 'duration'
+        return "steps" if self.steps_radio.isChecked() else "duration"
 
     def get_top_bar_height(self) -> int:
         """Get the current top bar height value.
-        
+
         Returns:
             Current top bar height in pixels
         """
@@ -845,7 +844,7 @@ class SettingsPanel(QWidget):
 
     def get_test_username(self) -> str:
         """Get the current test username value.
-        
+
         Returns:
             Current test username
         """
@@ -869,7 +868,7 @@ class SettingsPanel(QWidget):
 
     def get_enable_traffic_capture(self) -> bool:
         """Get the current traffic capture enabled state.
-        
+
         Returns:
             True if traffic capture is enabled
         """
@@ -877,7 +876,7 @@ class SettingsPanel(QWidget):
 
     def get_enable_video_recording(self) -> bool:
         """Get the current video recording enabled state.
-        
+
         Returns:
             True if video recording is enabled
         """
@@ -885,7 +884,7 @@ class SettingsPanel(QWidget):
 
     def get_enable_mobsf_analysis(self) -> bool:
         """Get the current MobSF analysis enabled state.
-        
+
         Returns:
             True if MobSF analysis is enabled
         """
@@ -893,19 +892,11 @@ class SettingsPanel(QWidget):
 
     def get_enable_droidrun_agent(self) -> bool:
         """Get the current DroidRun agent enabled state.
-        
+
         Returns:
             True if DroidRun agent is enabled
         """
         return self.enable_droidrun_checkbox.isChecked()
-
-    def get_use_adb_actions(self) -> bool:
-        """Get whether ADB actions are enabled for DroidRun.
-
-        Returns:
-            True if ADB actions are enabled
-        """
-        return self.use_adb_actions_checkbox.isChecked()
 
     def get_exploration_objective(self) -> str:
         """Get the current exploration objective / prompt for DroidRun.
@@ -915,10 +906,25 @@ class SettingsPanel(QWidget):
         """
         return self.exploration_objective_input.toPlainText().strip()
 
+    def get_ui_parser_mode(self) -> str:
+        """Get the current UI parser mode.
+
+        Returns:
+            UI parser mode: "boost", "omniparser", or "accessibility"
+        """
+        return self.ui_parser_mode_combo.currentText()
+
+    def get_replicate_api_key(self) -> str:
+        """Get the current Replicate API key.
+
+        Returns:
+            Replicate API key
+        """
+        return self.replicate_api_key_input.text().strip()
 
     def get_pcapdroid_api_key(self) -> str:
         """Get the current PCAPdroid API key.
-        
+
         Returns:
             PCAPdroid API key
         """
@@ -926,7 +932,7 @@ class SettingsPanel(QWidget):
 
     def get_mobsf_api_url(self) -> str:
         """Get the current MobSF API URL.
-        
+
         Returns:
             MobSF API URL
         """
@@ -934,7 +940,7 @@ class SettingsPanel(QWidget):
 
     def get_mobsf_api_key(self) -> str:
         """Get the current MobSF API key.
-        
+
         Returns:
             MobSF API key
         """
@@ -944,19 +950,20 @@ class SettingsPanel(QWidget):
         """Reset all settings to default values."""
         self.gemini_api_key_input.clear()
         self.openrouter_api_key_input.clear()
-        self.system_prompt_input.clear()
+        self.replicate_api_key_input.clear()
         self.max_steps_input.setValue(100)
         self.max_duration_input.setValue(300)
         self.test_username_input.clear()
         self.test_password_input.clear()
+        self.ui_parser_mode_combo.setCurrentText("omniparser")
 
     def _validate_api_key(self, api_key: str, provider_name: str) -> bool:
         """Validate API key format and optionally test connectivity.
-        
+
         Args:
             api_key: The API key to validate
             provider_name: Name of the provider for error messages
-            
+
         Returns:
             True if valid, False otherwise
         """
@@ -966,72 +973,68 @@ class SettingsPanel(QWidget):
                 self,
                 f"Invalid {provider_name} API Key",
                 f"The {provider_name} API key appears to be too short.\n\n"
-                f"Please check that you have entered a valid API key."
+                f"Please check that you have entered a valid API key.",
             )
             return False
-        
-        if not api_key.startswith(('sk-', 'AIza', 'pk-')) and provider_name != "OpenRouter":
+
+        if not api_key.startswith(("sk-", "AIza", "pk-")) and provider_name != "OpenRouter":
             # Allow more flexible validation for OpenRouter
             if len(api_key) < 30:
                 QMessageBox.warning(
                     self,
                     f"Invalid {provider_name} API Key",
                     f"The {provider_name} API key format appears invalid.\n\n"
-                    f"Please check that you have entered a valid API key."
+                    f"Please check that you have entered a valid API key.",
                 )
                 return False
-        
+
         # For more thorough validation, we could make a test API call here
         # But for now, basic format validation is sufficient
-        
+
         return True
 
     def _validate_mobsf_url(self, url: str) -> bool:
         """Validate MobSF API URL format.
-        
+
         Args:
             url: The URL to validate
-            
+
         Returns:
             True if valid, False otherwise
         """
         if not url:
             QMessageBox.warning(
-                self,
-                "Invalid MobSF API URL",
-                "MobSF API URL cannot be empty when MobSF analysis is enabled."
+                self, "Invalid MobSF API URL", "MobSF API URL cannot be empty when MobSF analysis is enabled."
             )
             return False
-        
+
         # Basic URL format validation
         if not url.startswith(("http://", "https://")):
             QMessageBox.warning(
                 self,
                 "Invalid MobSF API URL",
-                "MobSF API URL must start with http:// or https://\n\n"
-                f"Example: http://localhost:8000"
+                f"MobSF API URL must start with http:// or https://\n\nExample: http://localhost:8000",
             )
             return False
-        
+
         # Check for basic URL structure
         try:
             from urllib.parse import urlparse
+
             parsed = urlparse(url)
             if not parsed.netloc:
                 QMessageBox.warning(
                     self,
                     "Invalid MobSF API URL",
-                    "MobSF API URL appears to be malformed.\n\n"
-                    f"Example: http://localhost:8000"
+                    f"MobSF API URL appears to be malformed.\n\nExample: http://localhost:8000",
                 )
                 return False
         except Exception:
             QMessageBox.warning(
                 self,
                 "Invalid MobSF API URL",
-                "MobSF API URL appears to be malformed.\n\n"
-                f"Example: http://localhost:8000"
+                f"MobSF API URL appears to be malformed.\n\nExample: http://localhost:8000",
             )
             return False
-        
+
         return True
