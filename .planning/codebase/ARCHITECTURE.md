@@ -1,124 +1,173 @@
+<!-- refreshed: 2026-05-01 -->
 # Architecture
 
-**Analysis Date:** 2026-04-05
+**Analysis Date:** 2026-05-01
+
+## System Overview
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                 Interface / Entry Layer                      │
+├──────────────────┬──────────────────┬───────────────────────┤
+│   CLI            │   GUI            │   Startup scripts      │
+│  `run_cli.py`    │ `run_ui.py`      │ `scripts/start.ps1`    │
+│  `src/mobile_`   │ `src/mobile_`    │                        │
+│  `crawler/cli/*` │ `crawler/ui/*`   │                        │
+└────────┬─────────┴────────┬─────────┴──────────┬────────────┘
+         │                  │                     │
+         ▼                  ▼                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Orchestration / Domain                       │
+│  `src/mobile_crawler/core/*` + `src/mobile_crawler/domain/*`│
+└─────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│               Persistence / Artifacts / External             │
+│ `src/mobile_crawler/infrastructure/*` + `external/droidrun` │
+│ SQLite (`crawler.db`, `user_config.db`) + session folders   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Component Responsibilities
+
+| Component | Responsibility | File |
+|-----------|----------------|------|
+| CLI command surface | Parses commands/options and starts crawl/config/report/list/delete workflows | `src/mobile_crawler/cli/main.py`, `src/mobile_crawler/cli/commands/*.py` |
+| GUI shell | Builds widgets, wires Qt signals, starts crawl worker thread, updates dashboards | `src/mobile_crawler/ui/main_window.py`, `src/mobile_crawler/ui/signal_adapter.py` |
+| Crawl orchestrator | Owns crawl lifecycle, emits events, delegates exploration to DroidRun service | `src/mobile_crawler/core/crawler_loop.py` |
+| Domain integration services | Adapts provider/model discovery, DroidRun agent behavior, reporting orchestration | `src/mobile_crawler/domain/droidrun_agent_service.py`, `src/mobile_crawler/domain/providers/*.py`, `src/mobile_crawler/domain/report_generator.py` |
+| Infrastructure repositories | Handles SQLite schema/migrations and data CRUD for runs/screens/steps/AI interactions | `src/mobile_crawler/infrastructure/database.py`, `src/mobile_crawler/infrastructure/*_repository.py` |
+| Artifact/session layout | Creates and resolves run folder topology (screenshots, reports, pcap, logs, data) | `src/mobile_crawler/infrastructure/session_folder_manager.py` |
 
 ## Pattern Overview
 
-**Overall:** Clean Domain-Driven Design with hexagonal architecture layers
+**Overall:** Layered modular monolith with repository pattern + event-listener bridge
 
 **Key Characteristics:**
-- Clear separation of concerns with CLI, Domain, Core, and Infrastructure layers
-- DroidRun AI agent integration for intelligent mobile exploration
-- Event-driven architecture with listener pattern for crawl lifecycle
-- SQLite persistence with repository pattern for data access
-- Command and Query separation for CLI operations
+- Interface layers (`cli`, `ui`) call into `core` orchestration and avoid direct SQL.
+- `core` emits listener events via `CrawlerEventListener` contract (`src/mobile_crawler/core/crawler_event_listener.py`).
+- `infrastructure` encapsulates external system calls (ADB, SQLite, MobSF, file system).
 
 ## Layers
 
-**CLI Layer:**
-- Purpose: Command-line interface entry point and command handling
-- Location: `src/mobile_crawler/cli/`
-- Contains: Click command definitions and command handlers
-- Depends on: Domain layer for business logic
-- Used by: End users via command line
+**Interface Layer:**
+- Purpose: Accept user intent and map it to crawl/report/config operations.
+- Location: `run_cli.py`, `run_ui.py`, `src/mobile_crawler/cli/`, `src/mobile_crawler/ui/`
+- Contains: Click commands, Qt widgets, startup helpers.
+- Depends on: `config`, `core`, `domain`, `infrastructure`.
+- Used by: End users and scripts.
 
-**Domain Layer:**
-- Purpose: Core business logic and domain models
-- Location: `src/mobile_crawler/domain/`
-- Contains: AI agents, action execution, screen tracking, and core models
-- Depends on: Core layer for orchestration
-- Used by: CLI and UI layers (if present)
-
-**Core Layer:**
-- Purpose: Application orchestration and coordination
+**Application/Core Layer:**
+- Purpose: Crawl lifecycle orchestration, state transitions, event emission.
 - Location: `src/mobile_crawler/core/`
-- Contains: Crawl controller, state machine, event system, and logging
-- Depends on: Domain layer for business objects
-- Used by: CLI layer to manage execution
+- Contains: `CrawlerLoop`, control/state helpers, logging bridges.
+- Depends on: `domain` services + `infrastructure` repositories/managers.
+- Used by: CLI command `crawl` and GUI `MainWindow`.
+
+**Domain Services Layer:**
+- Purpose: Provider/model logic, DroidRun adapter logic, reporting assembly, grounding.
+- Location: `src/mobile_crawler/domain/`
+- Contains: `DroidRunAgentService`, provider registry, models, report generator, OCR grounding modules.
+- Depends on: `config`, `infrastructure`, external SDKs.
+- Used by: `core` and UI service creation.
 
 **Infrastructure Layer:**
-- Purpose: External systems and persistence abstraction
+- Purpose: Persistence, filesystem artifacts, ADB/process integration, feature managers.
 - Location: `src/mobile_crawler/infrastructure/`
-- Contains: Database, ADB client, Appium driver, repositories
-- Depends on: Config layer for settings
-- Used by: Domain and Core layers
+- Contains: DB manager, repositories, session folders, device detection, MobSF and export utilities.
+- Depends on: SQLite, OS, subprocess tools, HTTP clients.
+- Used by: all upper layers.
 
 ## Data Flow
 
-**Crawl Execution Flow:**
+### Primary Request Path
 
-1. CLI command triggers crawl via `crawl` command
-2. CrawlController manages state transitions (RUNNING/PAUSED/STOPPED)
-3. CrawlerLoop wraps DroidRun agent service
-4. DroidRunAgentService executes AI-guided exploration
-5. ActionExecutors perform actual device interactions
-6. Events emitted to listeners throughout the process
-7. Screen deduplication via perceptual hashing
-8. Results persisted to SQLite via repositories
+1. CLI or GUI starts crawl (`src/mobile_crawler/cli/commands/crawl.py:180`, `src/mobile_crawler/ui/main_window.py:348`).
+2. Run row is created and crawler loop invoked (`src/mobile_crawler/cli/commands/crawl.py:228`, `src/mobile_crawler/core/crawler_loop.py:125`).
+3. `CrawlerLoop` creates session folder + updates run path (`src/mobile_crawler/core/crawler_loop.py:141`, `src/mobile_crawler/infrastructure/session_folder_manager.py:31`).
+4. `CrawlerLoop` delegates exploration to DroidRun agent service (`src/mobile_crawler/core/crawler_loop.py:177`, `src/mobile_crawler/domain/droidrun_agent_service.py:346`).
+5. Final status/stats are persisted, then completion event is emitted (`src/mobile_crawler/core/crawler_loop.py:232`, `src/mobile_crawler/core/crawler_loop.py:246`).
 
-**Configuration Flow:**
+### Secondary Flow: Report Generation
 
-1. ConfigManager loads defaults, user config, and environment
-2. Settings cascaded through layers via dependency injection
-3. Configuration used to initialize infrastructure components
-4. Runtime updates reflected in service layer
+1. UI/CLI requests report (`src/mobile_crawler/ui/widgets/run_history_view.py`, `src/mobile_crawler/cli/commands/report.py:10`).
+2. Domain report generator fetches run, steps, AI interactions (`src/mobile_crawler/domain/report_generator.py:53`, `src/mobile_crawler/domain/report_generator.py:57`, `src/mobile_crawler/domain/report_generator.py:74`).
+3. Reporting correlator + Jinja generator create HTML output in run reports folder (`src/mobile_crawler/domain/report_generator.py:105`, `src/mobile_crawler/domain/report_generator.py:123`).
+
+**State Management:**
+- Persistent run/config state is SQLite-backed (`src/mobile_crawler/infrastructure/database.py`, `src/mobile_crawler/infrastructure/user_config_store.py`).
+- In-memory runtime state lives in `MainWindow` fields and `CrawlerLoop` instance fields (`src/mobile_crawler/ui/main_window.py`, `src/mobile_crawler/core/crawler_loop.py`).
 
 ## Key Abstractions
 
-**CrawlController:**
-- Purpose: Thread-safe crawl state management
-- Examples: `src/mobile_crawler/core/crawl_controller.py`
-- Pattern: State machine with observer pattern
+**Event Listener Contract:**
+- Purpose: Decouple crawler execution from UI/CLI outputs.
+- Examples: `src/mobile_crawler/core/crawler_event_listener.py`, `src/mobile_crawler/ui/signal_adapter.py`, `src/mobile_crawler/cli/commands/crawl.py` (`JSONEventListener`)
+- Pattern: Observer/listener.
 
-**DroidRunAgentService:**
-- Purpose: AI-driven mobile app exploration service
-- Examples: `src/mobile_crawler/domain/droidrun_agent_service.py`
-- Pattern: Adapter pattern for DroidRun integration
+**Repository Abstraction:**
+- Purpose: Encapsulate SQL and row-to-dataclass mapping.
+- Examples: `src/mobile_crawler/infrastructure/run_repository.py`, `src/mobile_crawler/infrastructure/step_log_repository.py`, `src/mobile_crawler/infrastructure/ai_interaction_repository.py`
+- Pattern: Repository + dataclass DTOs.
 
-**RunRepository:**
-- Purpose: Data access abstraction for crawl runs
-- Examples: `src/mobile_crawler/infrastructure/run_repository.py`
-- Pattern: Repository pattern with SQLite backend
-
-**ActionExecutor:**
-- Purpose: Platform-specific action execution abstraction
-- Examples: `src/mobile_crawler/domain/action_executor.py`, `src/mobile_crawler/domain/adb_action_executor.py`
-- Pattern: Strategy pattern for different execution backends
+**Session Artifact Manager:**
+- Purpose: Standardize run output folders and path resolution.
+- Examples: `src/mobile_crawler/infrastructure/session_folder_manager.py`
+- Pattern: Centralized filesystem policy object.
 
 ## Entry Points
 
-**CLI Entry:**
-- Location: `src/mobile_crawler/cli/main.py`
-- Triggers: Command line invocations
-- Responsibilities: Parse arguments and delegate to appropriate commands
+**CLI Entrypoint:**
+- Location: `run_cli.py`, `src/mobile_crawler/cli/main.py`
+- Triggers: `mobile-crawler-cli` script or direct Python execution.
+- Responsibilities: Register Click command group and dispatch subcommands.
 
-**Crawl Execution:**
-- Location: `src/mobile_crawler/cli/commands/crawl.py`
-- Triggers: Crawl command execution
-- Responsibilities: Initialize services and start crawl loop
+**GUI Entrypoint:**
+- Location: `run_ui.py`, `src/mobile_crawler/ui/main_window.py:1515`
+- Triggers: `mobile-crawler-gui` script or direct Python execution.
+- Responsibilities: Build `QApplication`, instantiate `MainWindow`, start event loop.
 
-**AI Interaction:**
-- Location: `src/mobile_crawler/domain/droidrun_agent_service.py`
-- Triggers: AI model calls for action recommendations
-- Responsibilities: Format requests and process AI responses
+**Startup Orchestration Script:**
+- Location: `scripts/start.ps1`
+- Triggers: Manual shell execution.
+- Responsibilities: Optionally start MobSF/Appium and then launch UI.
+
+## Architectural Constraints
+
+- **Threading:** Qt main thread + `QThread` worker (`src/mobile_crawler/ui/main_window.py:133`) plus dedicated crawl thread option in `CrawlerLoop.start` (`src/mobile_crawler/core/crawler_loop.py:58`) and per-run asyncio loop (`src/mobile_crawler/core/crawler_loop.py:263`).
+- **Global state:** Module-level config singleton (`src/mobile_crawler/config/config_manager.py:103`) and root logger filters installed on import (`src/mobile_crawler/domain/droidrun_agent_service.py:45`).
+- **Circular imports:** Not detected in inspected modules; local imports are used in some UI helpers to avoid cycles (`src/mobile_crawler/ui/main_window.py:551`).
+- **External runtime dependency:** Exploration logic is delegated to vendored submodule `external/droidrun`; local loop is intentionally thin (`src/mobile_crawler/core/crawler_loop.py:21`).
+
+## Anti-Patterns
+
+### Drifted Interface Usage
+
+**What happens:** Some call sites reference methods that are not present in current classes (e.g., `src/mobile_crawler/cli/commands/delete.py` calls `get_session_folder`, and `src/mobile_crawler/cli/commands/list.py` calls `get_recent_runs`).  
+**Why it's wrong:** It creates runtime failure risk and indicates stale coupling across layers.  
+**Do this instead:** Use currently implemented APIs in `src/mobile_crawler/infrastructure/session_folder_manager.py` (`create_session_folder`, `get_session_path`) and `src/mobile_crawler/infrastructure/run_repository.py` (`get_all_runs`/explicit query methods) consistently across CLI/UI files.
+
+### Duplicate Repository Method Definitions
+
+**What happens:** `ScreenRepository` defines `get_screens_by_run` twice in the same class.  
+**Why it's wrong:** Later definition silently overrides earlier behavior, making data semantics unclear.  
+**Do this instead:** Keep a single canonical query method and split alternate behavior into explicitly named methods in `src/mobile_crawler/infrastructure/screen_repository.py`.
 
 ## Error Handling
 
-**Strategy:** Layered error handling with graceful degradation
+**Strategy:** Catch-and-emit around orchestration boundaries; keep crawl loop alive where possible.
 
 **Patterns:**
-- Recovery mechanisms for device disconnections
-- Retry logic for AI model failures
-- Event-based error notifications to listeners
-- Persistent error state in database for failed runs
+- CLI commands wrap top-level actions with `try/except` and abort with Click errors (`src/mobile_crawler/cli/commands/*.py`).
+- `CrawlerLoop.run` captures exceptions, emits `on_error`, and transitions to STOPPED in `finally` (`src/mobile_crawler/core/crawler_loop.py:254`).
 
 ## Cross-Cutting Concerns
 
-**Logging:** Structured logging with JSONL output per run
-**Validation:** Pre-crawl validation of device and app state
-**Authentication:** Configurable API keys for AI providers
-**Monitoring:** Runtime statistics collection and reporting
+**Logging:** Python logging + UI bridge handler + stdout/stderr capture (`src/mobile_crawler/core/log_sinks.py`, `src/mobile_crawler/ui/main_window.py`).  
+**Validation:** UI pre-flight checks for selected device/package/model and required keys (`src/mobile_crawler/ui/main_window.py:404`).  
+**Authentication:** API keys are read from encrypted config store and env fallbacks (`src/mobile_crawler/infrastructure/user_config_store.py`, `src/mobile_crawler/domain/droidrun_agent_service.py:165`).
 
 ---
 
-*Architecture analysis: 2026-04-05*
+*Architecture analysis: 2026-05-01*

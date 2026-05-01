@@ -1,154 +1,154 @@
 # Codebase Concerns
 
-**Analysis Date:** 2026-04-05
+**Analysis Date:** 2026-05-01
 
 ## Tech Debt
 
-**Screen Change Detection:**
-- Issue: Navigation tracking incomplete, important for crawler state management
-- Files: `src/mobile_crawler/domain/action_executor.py:122`
-- Impact: Crawler may lose track of app navigation state
-- Fix approach: Implement screen change detection using UI hierarchy comparison or accessibility events
+**Secret storage path inconsistency:**
+- Issue: secrets are saved as encrypted values in `secrets` table from `src/mobile_crawler/ui/widgets/settings_panel.py:673-757`, but also written as plain settings in `src/mobile_crawler/ui/main_window.py:509-533`.
+- Files: `src/mobile_crawler/ui/widgets/settings_panel.py`, `src/mobile_crawler/ui/main_window.py`, `src/mobile_crawler/infrastructure/user_config_store.py`
+- Impact: duplicated credential paths, accidental plaintext persistence, and inconsistent runtime reads.
+- Fix approach: route all API keys through `UserConfigStore.set_secret_plaintext()` and stop writing keys via `ConfigManager.set()`.
 
-**Exception Handling:**
-- Issue: Bare except clause catches all exceptions without specific handling
-- Files: `src/mobile_crawler/domain/report_generator.py:138`
-- Impact: Poor error tracking and debugging capabilities
-- Fix approach: Replace with specific exception types and proper error handling
+**Error suppression in core paths:**
+- Issue: exceptions are swallowed with `except Exception: pass/continue` in runtime-critical code.
+- Files: `src/mobile_crawler/infrastructure/database.py:305-306`, `src/mobile_crawler/core/crawler_loop.py:283-286`, `src/mobile_crawler/domain/droidrun_agent_service.py:91-93`
+- Impact: failures become silent, root-cause analysis is slow, and partial failures appear as successful execution.
+- Fix approach: replace blanket suppression with typed exceptions and structured logging including context (`run_id`, `step_number`, operation).
 
-**Logging Implementation:**
-- Issue: excessive debug logging in production codebase
-- Files: `src/mobile_crawler/infrastructure/appium_driver.py` (multiple debug logs)
-- Impact: Performance degradation and noise in production logs
-- Fix approach: Use appropriate log levels and conditionally debug logging based on environment
+**Monolithic classes increase change risk:**
+- Issue: UI/controller files are very large and hold mixed responsibilities.
+- Files: `src/mobile_crawler/ui/main_window.py` (~1249 lines), `src/mobile_crawler/ui/widgets/settings_panel.py` (~853 lines), `src/mobile_crawler/domain/droidrun_agent_service.py` (~729 lines)
+- Impact: high regression probability and difficult localized testing.
+- Fix approach: split orchestration, UI composition, and persistence concerns into smaller modules with explicit interfaces.
+
+**Packaging and test config drift:**
+- Issue: duplicated test configuration exists in both `pytest.ini` and `pyproject.toml`, and `requirements.txt` does not represent full runtime dependencies.
+- Files: `pytest.ini`, `pyproject.toml`, `requirements.txt`
+- Impact: non-reproducible local environments and different behavior between `pytest` invocations.
+- Fix approach: keep a single pytest config source and generate/maintain one authoritative dependency manifest.
 
 ## Known Bugs
 
-**Screen Recording Reliability:**
-- Symptoms: Video recording may fail silently or produce empty files
-- Files: `src/mobile_crawler/infrastructure/appium_driver.py:575-617`
-- Trigger: Appium session instability or device limitations
-- Workaround: Check return values and implement retry logic
+**Pre-crawl device validation uses wrong attribute:**
+- Symptoms: validation fails with a generic device connectivity error even when device is attached.
+- Files: `src/mobile_crawler/core/pre_crawl_validator.py:130`
+- Trigger: any validation path calling `_check_device_connected()` with connected devices.
+- Workaround: change `d.id` to `d.device_id`.
 
-**State Management Inconsistencies:**
-- Symptoms: App context may not be properly maintained between actions
-- Files: `src/mobile_crawler/domain/app_context_manager.py:89,109,138`
-- Trigger: Multiple rapid actions or app switches
-- Workaround: Implement proper state validation and recovery
+**Replicate API key lookup mismatch:**
+- Symptoms: OmniParser Replicate backend reports missing key even after saving key in settings.
+- Files: `src/mobile_crawler/domain/omni_parser_client.py:114`, `src/mobile_crawler/ui/widgets/settings_panel.py:786-789`
+- Trigger: local key saved as `replicate_api_key`; runtime lookup expects `omniparser_replicate_api_key`.
+- Workaround: read `replicate_api_key` (or migrate key names with backward-compatible fallback).
+
+**CLI tests fail on default test command:**
+- Symptoms: `ModuleNotFoundError: No module named 'mobile_crawler'` during collection.
+- Files: `pytest.ini`, `tests/cli/test_config_command.py`
+- Trigger: running `pytest` with `pytest.ini` (missing `pythonpath = src`).
+- Workaround: add `pythonpath = src` to `pytest.ini` or remove duplicated config file.
 
 ## Security Considerations
 
-**Subprocess Command Injection:**
-- Risk: Potential command injection through unsanitized inputs
-- Files: Multiple files using `subprocess.run()` with user input
-- Current mitigation: Basic input sanitization in some areas
-- Recommendations: Implement parameterized commands and input validation
+**Hardcoded third-party credential in test code:**
+- Risk: repository contains a static API credential in test source.
+- Files: `tests/integration/test_mailosaur_e2e.py`
+- Current mitigation: Not detected.
+- Recommendations: remove hardcoded secret, load only from environment/secure store, rotate exposed token.
 
-**Configuration Security:**
-- Risk: Sensitive data stored in SQLite without encryption
-- Files: `src/mobile_crawler/config/config_manager.py`
-- Current mitigation: Environment variable support for secrets
-- Recommendations: Implement encryption for sensitive configuration values
+**Plaintext key file generated in project root:**
+- Risk: startup script writes MobSF API key to plaintext file.
+- Files: `scripts/start.ps1:396-410`, `src/mobile_crawler/ui/widgets/settings_panel.py:627-650`
+- Current mitigation: `.mobsf_api_key` is gitignored in `.gitignore:70`.
+- Recommendations: avoid filesystem plaintext storage; pass key via process env or secret store and delete transient artifacts immediately.
 
-**External Service Dependencies:**
-- Risk: Dependency on external services (Mailosaur, PCAPdroid) without proper validation
-- Files: `src/mobile_crawler/infrastructure/mailosaur/service.py`, `src/mobile_crawler/domain/traffic_capture_manager.py`
-- Current mitigation: Basic permission checks
-- Recommendations: Implement service health checks and fallback mechanisms
+**Secrets can be echoed to terminal:**
+- Risk: `config get` prints decrypted secret values to stdout.
+- Files: `src/mobile_crawler/cli/commands/config.py:97-101`
+- Current mitigation: output prefix `[ENCRYPTED]` only labels the value but still reveals plaintext.
+- Recommendations: redact by default and add explicit `--show-secret` confirmation flow.
 
 ## Performance Bottlenecks
 
-**Large Resource File:**
-- Problem: UI resource file is extremely large (3795 lines)
-- Files: `src/mobile_crawler/ui/resources/resources_rc.py`
-- Cause: Auto-generated Qt resources
-- Improvement path: Optimize resource generation or split into multiple files
+**Inefficient run lookup path:**
+- Problem: single run fetch performs full-table query then Python-side search.
+- Files: `src/mobile_crawler/infrastructure/run_repository.py:75-85`
+- Cause: `get_run_by_id()` delegates to `get_all_runs()`.
+- Improvement path: add direct SQL query `SELECT * FROM runs WHERE id = ?`.
 
-**Synchronous Operations:**
-- Problem: Some async operations use blocking calls
-- Files: `src/mobile_crawler/infrastructure/adb_client.py:92`
-- Cause: Backward compatibility requirements
-- Improvement path: Migrate fully to async patterns where possible
+**ADB-heavy per-device metadata fetch:**
+- Problem: each detected device triggers multiple sequential `adb shell getprop` calls.
+- Files: `src/mobile_crawler/infrastructure/device_detection.py:185-205`
+- Cause: property-by-property subprocess invocation.
+- Improvement path: fetch all props once (`getprop`) and parse in memory.
 
-**Action Delays:**
-- Problem: Fixed 2-second delays between actions may be too long
-- Files: `src/mobile_crawler/domain/action_executor.py:42`
-- Cause: Visual observability requirement
-- Improvement path: Make delay configurable and adaptive based on action type
+**PCAP parsing caps and low-fidelity HTTPS handling:**
+- Problem: parser stops at 1000 requests and represents HTTPS as `https://unknown`.
+- Files: `src/mobile_crawler/reporting/parsers/pcap_parser.py:8-50`
+- Cause: hardcoded cap and placeholder TLS parsing.
+- Improvement path: stream parse with configurable cap and add SNI/host extraction.
 
 ## Fragile Areas
 
-**Appium Session Management:**
-- Files: `src/mobile_crawler/infrastructure/appium_driver.py`
-- Why fragile: Appium sessions can be lost unexpectedly
-- Safe modification: Implement session health checks and auto-reconnection
-- Test coverage: Needs better session loss recovery tests
+**Private-method coupling across UI widgets:**
+- Files: `src/mobile_crawler/ui/main_window.py:791-795`, `src/mobile_crawler/ui/main_window.py:889-892`
+- Why fragile: parent widget calls child internals (`_is_full_response`, `_load_runs`) instead of stable public API.
+- Safe modification: expose explicit public methods in `AIMonitorPanel` and `RunHistoryView`; update call sites to public contracts only.
+- Test coverage: limited direct contract tests for these widget interactions.
 
-**ADB Command Execution:**
-- Files: `src/mobile_crawler/infrastructure/adb_client.py`
-- Why fragile: Device connectivity issues and command timeouts
-- Safe modification: Implement exponential backoff for retries
-- Test coverage: Limited error scenario testing
-
-**Configuration Loading:**
-- Files: `src/mobile_crawler/config/config_manager.py:44-48`
-- Why fragile: Database access failures can cascade
-- Safe modification: Implement graceful fallback mechanisms
-- Test coverage: Missing database failure scenarios
+**Global logging side effects at import time:**
+- Files: `src/mobile_crawler/domain/droidrun_agent_service.py:43-52`
+- Why fragile: root logger filters are modified during module import and affect unrelated logging paths.
+- Safe modification: register filters in explicit startup wiring and make it idempotent.
+- Test coverage: no targeted tests asserting logger isolation across modules.
 
 ## Scaling Limits
 
-**Memory Usage:**
-- Current capacity: Unknown, likely limited by Appium and device capabilities
-- Limit: Large numbers of simultaneous crawls may exhaust device resources
-- Scaling path: Implement per-device resource monitoring and limits
+**Single-process, local-SQLite execution model:**
+- Current capacity: one crawler process with local file DB (`src/mobile_crawler/infrastructure/database.py`).
+- Limit: concurrent multi-device crawl orchestration is constrained by process/thread model.
+- Scaling path: isolate run execution workers and move persistence to a multi-writer datastore.
 
-**Database Size:**
-- Current capacity: SQLite without size optimization
-- Limit: May become slow with many crawl runs
-- Scaling path: Implement data pruning and index optimization
-
-**Concurrent Crawls:**
-- Current capacity: Single process design
-- Limit: Cannot crawl multiple devices simultaneously
-- Scaling path: Refactor to async event-driven architecture
+**Growing local artifacts per run:**
+- Current capacity: artifacts are always materialized into session folders (`src/mobile_crawler/core/crawler_loop.py:141-143`).
+- Limit: disk growth and slower run history operations over long-lived usage.
+- Scaling path: retention policy + archival for old runs + lazy loading in history UI.
 
 ## Dependencies at Risk
 
-**Appium:**
-- Risk: Version compatibility issues
-- Impact: Core functionality dependent
-- Migration plan: Pin to specific stable version with testing
-
-**PyQt/PySide:**
-- Risk: GUI framework version updates
-- Impact: UI may break with major version changes
-- Migration plan: Test compatibility before upgrades
+**DroidRun submodule compatibility drift:**
+- Risk: tight runtime coupling to external submodule internals and async handler types.
+- Impact: upstream API changes can break crawler loop and cleanup.
+- Migration plan: wrap submodule calls behind a compatibility adapter and pin tested commit ranges.
+- Files: `.gitmodules`, `src/mobile_crawler/domain/droidrun_agent_service.py`
 
 ## Missing Critical Features
 
-**Network Traffic Analysis:**
-- Problem: Basic PCAP capture but no analysis
-- Blocks: Security testing and network behavior understanding
-- Priority: High for security-focused crawling
-
-**Test Automation Framework:**
-- Problem: Limited automated testing
-- Blocks: CI/CD pipeline reliability
-- Priority: High for maintainability
+**Continuous integration pipeline:**
+- Problem: repository has no detected CI workflow for tests/linting.
+- Blocks: reliable regression detection before merge.
+- Files: `.github/` (no `workflows/*.yml` detected)
 
 ## Test Coverage Gaps
 
-**Error Scenarios:**
-- What's not tested: Device disconnection, Appium session loss
-- Files: Core infrastructure modules
-- Risk: Silent failures in production
+**Security-sensitive credential flow testing:**
+- What's not tested: prevention of plaintext secret persistence and secret redaction in CLI output.
+- Files: `src/mobile_crawler/ui/main_window.py`, `src/mobile_crawler/cli/commands/config.py`, `tests/cli/test_config_command.py`
+- Risk: credential leakage remains undetected.
 - Priority: High
 
-**Configuration Edge Cases:**
-- What's not tested: Invalid configurations, missing settings
-- Files: Configuration management modules
-- Risk: Runtime crashes on invalid input
+**Failure-path and recovery assertions:**
+- What's not tested: schema migration failures, suppressed listener exceptions, and crawler loop cleanup under exceptions.
+- Files: `src/mobile_crawler/infrastructure/database.py`, `src/mobile_crawler/core/crawler_loop.py`
+- Risk: latent runtime failures appear only in production sessions.
+- Priority: High
+
+**Integration tests depend on live external systems:**
+- What's not tested: deterministic offline equivalents for auth/mail workflows.
+- Files: `tests/integration/test_auth_e2e.py`, `tests/integration/test_mailosaur_e2e.py`
+- Risk: flaky test outcomes and reduced confidence in CI adoption.
 - Priority: Medium
 
-*Concerns audit: 2026-04-05*
+---
+
+*Concerns audit: 2026-05-01*

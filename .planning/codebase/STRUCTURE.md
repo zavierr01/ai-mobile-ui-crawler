@@ -1,193 +1,134 @@
 # Codebase Structure
 
-**Analysis Date:** 2026-04-05
+**Analysis Date:** 2026-05-01
 
 ## Directory Layout
 
-```
-src/
-├── mobile_crawler/
-│   ├── cli/                    # Command Line Interface
-│   │   ├── __init__.py
-│   │   ├── main.py             # CLI entry point
-│   │   └── commands/           # Individual CLI commands
-│   │       ├── config.py       # Config management
-│   │       ├── crawl.py        # Start/stop crawling
-│   │       ├── delete.py       # Clean up runs
-│   │       ├── list.py         # List runs
-│   │       └── report.py       # Generate reports
-│   ├── config/                 # Configuration Management
-│   │   ├── __init__.py
-│   │   ├── config_manager.py   # Central configuration
-│   │   ├── defaults.py         # Default values
-│   │   └── paths.py           # Path utilities
-│   ├── core/                   # Core Application Logic
-│   │   ├── __init__.py
-│   │   ├── crawl_controller.py     # Pause/resume/stop control
-│   │   ├── crawler_event_listener.py
-│   │   ├── crawler_loop.py        # DroidRun integration
-│   │   ├── crawl_state_machine.py
-│   │   ├── logging_service.py      # Central logging
-│   │   ├── log_sinks.py
-│   │   ├── pre_crawl_validator.py
-│   │   ├── runtime_stats_collector.py
-│   │   ├── stale_run_cleaner.py
-│   │   └── stuck_detector.py
-│   ├── domain/                 # Domain Logic Layer
-│   │   ├── __init__.py
-│   │   ├── action_executor.py      # Action execution abstraction
-│   │   ├── adb_action_executor.py  # ADB backend
-│   │   ├── app_context_manager.py
-│   │   ├── droidrun_agent_service.py # DroidRun integration
-│   │   ├── exploration_journal.py
-│   │   ├── grounding/             # Grounding for AI decisions
-│   │   │   ├── __init__.py
-│   │   │   ├── dtos.py
-│   │   │   ├── interfaces.py
-│   │   │   ├── manager.py
-│   │   │   ├── mapper.py
-│   │   │   ├── ocr_engine.py
-│   │   │   └── overlay.py
-│   │   ├── models.py           # Domain models
-│   │   ├── model_adapters.py   # Type adapters
-│   │   ├── overlay_renderer.py
-│   │   ├── prompt_builder.py
-│   │   ├── prompts.py
-│   │   ├── providers/           # AI provider adapters
-│   │   │   ├── gemini_adapter.py
-│   │   │   ├── mock_adapter.py
-│   │   │   ├── ollama_adapter.py
-│   │   │   ├── openrouter_adapter.py
-│   │   │   ├── registry.py
-│   │   │   └── vision_detector.py
-│   │   ├── report_generator.py
-│   │   ├── screen_state_manager.py
-│   │   ├── screen_tracker.py
-│   │   ├── traffic_capture_manager.py
-│   │   └── video_recording_manager.py
-│   └── infrastructure/        # External Systems
-│       ├── __init__.py
-│       ├── adb_client.py           # ADB protocol client
-│       ├── adb_input_handler.py
-│       ├── ai_interaction_repository.py
-│       ├── ai_interaction_service.py
-│       ├── appium_driver.py        # Appium driver wrapper
-│       ├── capability_builder.py
-│       ├── credential_store.py
-│       ├── database.py            # SQLite management
-│       ├── device_detection.py     # USB/ADB device discovery
-│       ├── gesture_handler.py
-│       ├── mailosaur/             # Email verification service
-│       ├── mobsf_manager.py        # MobSF integration
-│       ├── run_exporter.py
-│       ├── run_repository.py       # Run data access
-│       ├── screen_repository.py    # Screen data access
-│       ├── screenshot_capture.py
-│       ├── session_folder_manager.py
-│       ├── step_log_repository.py
-│       └── user_config_store.py
+```text
+mobile-crawler/
+├── src/mobile_crawler/          # Main application package
+│   ├── cli/                     # Click CLI group + command modules
+│   ├── ui/                      # PySide6 main window + widgets/resources
+│   ├── core/                    # Crawl orchestration, lifecycle, logging bridges
+│   ├── domain/                  # Service logic, providers, models, reporting facade
+│   ├── infrastructure/          # SQLite/repos, ADB/system integration, managers
+│   ├── config/                  # Defaults, config manager, app-data path helpers
+│   └── reporting/               # Report contracts/parsers/templates/generator
+├── tests/                       # Layered pytest suites (ui/core/domain/infra/etc.)
+├── external/droidrun/           # Vendored submodule used by DroidRunAgentService
+├── scripts/                     # PowerShell startup automation
+├── docs/                        # User-facing guides
+├── run_cli.py                   # CLI bootstrap
+├── run_ui.py                    # GUI bootstrap
+└── pyproject.toml               # Packaging/tooling config
 ```
 
 ## Directory Purposes
 
-**CLI Layer (`src/mobile_crawler/cli/`):**
-- Purpose: User-facing command-line interface
-- Contains: Command definitions and argument parsing
-- Key files: `main.py` (entry point), `commands/crawl.py` (crawl execution)
+**`src/mobile_crawler/cli`:**
+- Purpose: Command-line entry and subcommand dispatch.
+- Contains: `main.py`, `commands/crawl.py`, `commands/config.py`, `commands/report.py`, `commands/list.py`, `commands/delete.py`.
+- Key files: `src/mobile_crawler/cli/main.py`, `src/mobile_crawler/cli/commands/crawl.py`.
 
-**Config Layer (`src/mobile_crawler/config/`):**
-- Purpose: Application configuration management
-- Contains: Default values, path resolution, and settings cascade
-- Key files: `config_manager.py` (central), `defaults.py` (values)
+**`src/mobile_crawler/ui`:**
+- Purpose: Desktop UI composition and event wiring.
+- Contains: `main_window.py`, `signal_adapter.py`, `widgets/*.py`, `resources/*`.
+- Key files: `src/mobile_crawler/ui/main_window.py`, `src/mobile_crawler/ui/signal_adapter.py`.
 
-**Core Layer (`src/mobile_crawler/core/`):**
-- Purpose: Application orchestration and coordination
-- Contains: Crawl lifecycle management and event system
-- Key files: `crawl_controller.py` (state), `crawler_loop.py` (loop)
+**`src/mobile_crawler/core`:**
+- Purpose: Crawl lifecycle orchestration and state/control primitives.
+- Contains: `crawler_loop.py`, `crawl_controller.py`, `crawl_state_machine.py`, `crawler_event_listener.py`, `log_sinks.py`.
+- Key files: `src/mobile_crawler/core/crawler_loop.py`, `src/mobile_crawler/core/crawler_event_listener.py`.
 
-**Domain Layer (`src/mobile_crawler/domain/`):**
-- Purpose: Business logic and AI-driven exploration
-- Contains: Action execution, AI agents, and domain models
-- Key files: `droidrun_agent_service.py` (AI), `models.py` (entities)
+**`src/mobile_crawler/domain`:**
+- Purpose: Business/service logic for DroidRun integration, providers, reporting.
+- Contains: `droidrun_agent_service.py`, `providers/*`, `grounding/*`, `models.py`, `report_generator.py`.
+- Key files: `src/mobile_crawler/domain/droidrun_agent_service.py`, `src/mobile_crawler/domain/providers/registry.py`.
 
-**Infrastructure Layer (`src/mobile_crawler/infrastructure/`):**
-- Purpose: External system integration and data persistence
-- Contains: Device control, database, and external services
-- Key files: `run_repository.py` (data), `adb_client.py` (device)
+**`src/mobile_crawler/infrastructure`:**
+- Purpose: DB schema/repositories and external system adapters.
+- Contains: `database.py`, `*_repository.py`, `user_config_store.py`, `session_folder_manager.py`, `device_detection.py`, `mobsf_manager.py`.
+- Key files: `src/mobile_crawler/infrastructure/database.py`, `src/mobile_crawler/infrastructure/run_repository.py`.
+
+**`tests`:**
+- Purpose: Automated test suites by concern/layer.
+- Contains: `tests/ui`, `tests/core`, `tests/domain`, `tests/infrastructure`, `tests/integration`, `tests/unit`.
+- Key files: `tests/conftest.py`, `tests/ui/test_main_window.py`, `tests/infrastructure/test_database.py`.
 
 ## Key File Locations
 
 **Entry Points:**
-- `src/mobile_crawler/cli/main.py`: CLI application entry
-- `src/mobile_crawler/cli/commands/crawl.py`: Crawl execution
-- `src/mobile_crawler/core/crawler_loop.py`: Main crawl loop
+- `run_cli.py`: Python CLI bootstrap to `mobile_crawler.cli.main:run`.
+- `run_ui.py`: Python GUI bootstrap to `mobile_crawler.ui.main_window:run`.
+- `src/mobile_crawler/cli/main.py`: Click group and command registration.
+- `src/mobile_crawler/ui/main_window.py`: GUI construction and application `run()` function.
 
 **Configuration:**
-- `src/mobile_crawler/config/config_manager.py`: Central configuration
-- `src/mobile_crawler/config/defaults.py`: Default settings
+- `pyproject.toml`: package metadata, script entry points, lint/test tool config.
+- `src/mobile_crawler/config/config_manager.py`: precedence-based config access (DB → env → defaults).
+- `src/mobile_crawler/config/defaults.py`: default runtime settings.
+- `src/mobile_crawler/config/paths.py`: OS-specific app-data root.
 
 **Core Logic:**
-- `src/mobile_crawler/domain/droidrun_agent_service.py`: AI integration
-- `src/mobile_crawler/domain/action_executor.py`: Action execution
-- `src/mobile_crawler/core/crawl_controller.py`: State management
+- `src/mobile_crawler/core/crawler_loop.py`: run orchestration and event emission.
+- `src/mobile_crawler/domain/droidrun_agent_service.py`: DroidRun execution adapter and cleanup.
+- `src/mobile_crawler/infrastructure/database.py`: schema/migration entry.
+- `src/mobile_crawler/infrastructure/session_folder_manager.py`: artifact directory policy.
 
 **Testing:**
-- `tests/`: Test directory (structure not explored)
+- `pytest.ini`: test path/markers.
+- `tests/`: main suite root.
+- `test_droidrun_integration.py`: standalone integration smoke script.
 
 ## Naming Conventions
 
 **Files:**
-- Lowercase with underscores: `crawl_controller.py`
-- Groups in subdirectories: `commands/crawl.py`
+- Python modules use `snake_case.py` (`crawler_loop.py`, `run_repository.py`, `ai_model_selector.py`).
+- Tests use `test_*.py` (`tests/ui/test_main_window.py`, `tests/domain/test_prompt_builder.py`).
 
-**Classes:**
-- PascalCase: `CrawlController`, `DroidRunAgentService`
-- Descriptive and purposeful: `ActionExecutor`, `RunRepository`
-
-**Methods:**
-- Snake_case: `get_run_by_id()`, `should_continue()`
-- Clear verbs: `start()`, `stop()`, `pause()`, `resume()`
-
-**Variables:**
-- Snake_case: `current_run_id`, `session_path`
-- Type hints throughout codebase
+**Directories:**
+- Top-level package areas map to architecture layers (`core`, `domain`, `infrastructure`, `ui`, `cli`, `config`).
+- UI-specific components are grouped under `ui/widgets/`.
 
 ## Where to Add New Code
 
-**New Crawl Feature:**
-- Primary code: `src/mobile_crawler/domain/`
-- Tests: `tests/`
-- Configuration: `src/mobile_crawler/config/defaults.py`
+**New Feature:**
+- Primary code: start in `src/mobile_crawler/domain/` for feature logic, `src/mobile_crawler/core/` for orchestration hooks.
+- Integration adapters: place external/API/DB interactions in `src/mobile_crawler/infrastructure/`.
+- UI wiring (if needed): `src/mobile_crawler/ui/main_window.py` plus dedicated widget in `src/mobile_crawler/ui/widgets/`.
+- Tests: mirror layer under `tests/domain/`, `tests/core/`, `tests/infrastructure/`, or `tests/ui/`.
 
-**New Command:**
-- Implementation: `src/mobile_crawler/cli/commands/new_command.py`
-- Register: `src/mobile_crawler/cli/main.py`
+**New Component/Module:**
+- CLI command: add module under `src/mobile_crawler/cli/commands/` and register in `src/mobile_crawler/cli/main.py`.
+- Domain service: add `snake_case` module under `src/mobile_crawler/domain/`.
+- Repository/table logic: add under `src/mobile_crawler/infrastructure/` and update `database.py` schema/migration paths.
 
-**New AI Provider:**
-- Implementation: `src/mobile_crawler/domain/providers/new_provider.py`
-- Register: `src/mobile_crawler/domain/providers/registry.py`
-
-**New External Service:**
-- Implementation: `src/mobile_crawler/infrastructure/new_service.py`
-- Configuration: `src/mobile_crawler/config/defaults.py`
+**Utilities:**
+- Shared cross-layer helper: `src/mobile_crawler/utils/` (currently minimal; prefer explicit layer placement first).
+- UI-only helper: `src/mobile_crawler/ui/` or `src/mobile_crawler/ui/widgets/`.
 
 ## Special Directories
 
-**`src/mobile_crawler/domain/grounding/`:**
-- Purpose: AI decision grounding and OCR processing
-- Generated: No
-- Committed: Yes
+**`external/droidrun`:**
+- Purpose: Submodule dependency for exploration engine.
+- Generated: No (versioned submodule checkout).
+- Committed: Yes.
 
-**`src/mobile_crawler/infrastructure/mailosaur/`:**
-- Purpose: Email verification service integration
-- Generated: No
-- Committed: Yes
+**`src/mobile_crawler/reporting/templates`:**
+- Purpose: Jinja2 HTML report templates.
+- Generated: No.
+- Committed: Yes.
 
-**`src/mobile_crawler/domain/providers/`:**
-- Purpose: AI model provider adapters
-- Generated: No
-- Committed: Yes
+**`src/mobile_crawler/ui/resources`:**
+- Purpose: Qt resource manifest + compiled resource module.
+- Generated: `resources_rc.py` is generated from `resources.qrc`.
+- Committed: Yes.
+
+**`htmlcov`:**
+- Purpose: pytest coverage HTML output.
+- Generated: Yes.
+- Committed: No (artifact directory).
 
 ---
 
-*Structure analysis: 2026-04-05*
+*Structure analysis: 2026-05-01*

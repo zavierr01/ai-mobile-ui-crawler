@@ -1,158 +1,95 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-04-05
+**Analysis Date:** 2026-05-01
 
 ## Naming Patterns
 
 **Files:**
-- Lowercase with underscores: `config_manager.py`, `crawl_controller.py`, `main_window.py`
-- Test files follow same pattern with `test_` prefix: `test_config_command.py`
-- CLI commands: `commands` directory with individual files per command
-- Package structure: `mobile_crawler` as root namespace
+- Use `snake_case.py` for source and test modules (examples: `src/mobile_crawler/core/stuck_detector.py`, `tests/core/test_stuck_detector.py`).
+- Name tests with `test_*.py` (examples: `tests/cli/test_main.py`, `tests/ui/test_main_window.py`).
 
 **Functions:**
-- Snake_case for function names: `get_config()`, `crawl_controller()`, `pause()`, `resume()`
-- Protected methods use underscore prefix: `_state`, `_notify_state_change()`
-- Private methods use double underscore: `__init_private_method()`
+- Use `snake_case` for functions/methods (examples: `record_screen_visit()` in `src/mobile_crawler/core/stuck_detector.py`, `test_cli_help()` in `tests/cli/test_main.py`).
+- Prefix internal helpers with `_` (examples: `_create_services()` in `src/mobile_crawler/ui/main_window.py`, `_create_signal_adapter()` in `tests/ui/test_signal_adapter.py`).
 
 **Variables:**
-- Snake_case for local variables: `user_config_store`, `max_crawl_steps`
-- Instance variables with underscore prefix: `_state`, `_lock`
-- Constants in UPPER_SNAKE_CASE: `DEFAULTS` (in `defaults.py`)
+- Use `snake_case` for local/module variables (examples: `mock_config_manager` in `tests/cli/test_crawl_command.py`, `stale_run_cleaner` in `src/mobile_crawler/ui/main_window.py`).
+- Use `UPPER_SNAKE_CASE` for constants (examples: `APP_PACKAGE` in `tests/integration/test_auth_e2e.py`).
 
-**Classes:**
-- PascalCase for class names: `CrawlController`, `ConfigManager`, `GeminiAdapter`
-- Enum classes follow same pattern: `CrawlControlState`
-- Adapters suffixed with "Adapter": `GeminiAdapter`
-
-**Type Hints:**
-- Used consistently throughout codebase
-- Imports from `typing`: `Optional`, `Dict`, `List`, `Any`, `Callable`
-- Complex types defined explicitly: `list[Callable[[CrawlControlState], None]]`
+**Types:**
+- Use `PascalCase` for classes, enums, dataclasses (examples: `DatabaseManager` in `src/mobile_crawler/infrastructure/database.py`, `ActionResult` in `src/mobile_crawler/domain/models.py`).
+- Prefer explicit typing via `typing` and built-in generics (examples: `Optional[Path]` in `src/mobile_crawler/infrastructure/database.py`, `list[Callable[..., None]]` in `src/mobile_crawler/core/crawl_controller.py`).
 
 ## Code Style
 
 **Formatting:**
-- Black formatter with line length 120
-- Ruff linter configured with:
-  - E: pycodestyle errors
-  - W: pycodestyle warnings
-  - F: pyflakes
-  - I: isort
-  - B: flake8-bugbear
-  - C4: flake8-comprehensions
-  - UP: pyupgrade
-- Ignored rules: E501 (line too long), B008 (function calls in args), C901 (too complex)
+- Tool used: Black + Ruff formatter via pre-commit (`.pre-commit-config.yaml`).
+- Key settings:
+  - Line length: `120` (`pyproject.toml` `[tool.black]`, `[tool.ruff]`)
+  - Target Python: `py39` (`pyproject.toml` `[tool.black]`, `[tool.ruff]`)
 
-**Docstrings:**
-- Triple quotes for all modules, classes, functions
-- Public methods have comprehensive docstrings with Args/Returns sections
-- Example from `crawl_controller.py`:
-```python
-def pause(self) -> None:
-    """Pause the crawl.
-
-    If the crawl is running, it will be paused.
-    If already paused or stopped, this is a no-op.
-    """
-```
+**Linting:**
+- Tool used: Ruff (`pyproject.toml` `[tool.ruff.lint]`).
+- Key rules:
+  - Enabled families: `E`, `W`, `F`, `I`, `B`, `C4`, `UP`
+  - Common ignores: `E501`, `B008`, `C901`
+  - Per-file ignores: `__init__.py` allows unused imports; `tests/**/*` allows `B011`
 
 ## Import Organization
 
 **Order:**
-1. Standard library imports (top-level)
-2. Third-party imports
-3. Local application imports (relative imports preferred)
-4. Internal module imports
-
-**Example pattern:**
-```python
-import logging
-import threading
-from typing import Callable, Optional
-from pathlib import Path
-
-import google.genai as genai
-from PIL import Image
-
-from mobile_crawler.domain.model_adapters import ModelAdapter
-from mobile_crawler.core.crawl_controller import CrawlControlState
-```
+1. Standard library imports (example in `src/mobile_crawler/core/crawl_controller.py`: `logging`, `threading`, `typing`, `enum`)
+2. Third-party imports (example in `src/mobile_crawler/cli/commands/crawl.py`: `click`)
+3. First-party absolute imports from `mobile_crawler.*` (example in `src/mobile_crawler/cli/commands/crawl.py`)
 
 **Path Aliases:**
-- Standard Python path resolution from `src` directory
-- No custom path aliases configured
+- Not used. Import project code through absolute package paths rooted at `mobile_crawler` (example: `from mobile_crawler.infrastructure.database import DatabaseManager` in `tests/infrastructure/test_database.py`).
 
 ## Error Handling
 
 **Patterns:**
-- Graceful degradation when possible (e.g., config fallback)
-- Try-except blocks around external dependencies
-- Logging with appropriate severity levels
-- Custom exceptions not heavily used - prefer return codes/checks
+- Catch broad exceptions at process boundaries, then report and exit gracefully (example: CLI command wrapper in `src/mobile_crawler/cli/commands/crawl.py`).
+- Catch sink/listener failures and continue processing (examples: `LoggingService.log()` in `src/mobile_crawler/core/logging_service.py`, `_notify_state_change()` in `src/mobile_crawler/core/crawl_controller.py`).
+- Use `pytest.raises(...)` for expected failure paths in tests (example: `tests/core/test_crawl_state_machine.py`).
 
-**Example from `config_manager.py`:**
-```python
-try:
-    db_value = self.user_config_store.get_setting(key)
-    if db_value is not None:
-        return db_value
-except Exception as e:
-    # If DB access fails, log it and continue to next source
-    import logging
-    logging.getLogger(__name__).error(f"DB Read Error for key '{key}': {e}", exc_info=True)
-    pass
-```
+## Logging
 
-**Logging:**
-- Standard Python `logging` module used throughout
-- Logger name matches module: `logger = logging.getLogger(__name__)`
-- Different log levels used appropriately:
-  - DEBUG: Detailed tracing
-  - INFO: State changes and significant events
-  - WARNING: Non-critical issues
-  - ERROR: Failures and exceptions
+**Framework:** Python `logging` + custom sink abstraction (`src/mobile_crawler/core/logging_service.py`, `src/mobile_crawler/core/log_sinks.py`)
+
+**Patterns:**
+- Create module-level logger with `logging.getLogger(__name__)` (example: `src/mobile_crawler/core/stuck_detector.py`).
+- Keep structured event output as JSON when needed (example: `JSONEventListener` in `src/mobile_crawler/cli/commands/crawl.py`).
+- Use `print(..., file=sys.stderr)` only as fallback in logging infrastructure (example: `src/mobile_crawler/core/logging_service.py`).
 
 ## Comments
 
 **When to Comment:**
-- Complex algorithms or business logic
-- API boundaries and external integrations
-- Non-obvious side effects
-- TODO/FIXME items with clear context
+- Add module/class/function docstrings consistently (examples throughout `src/mobile_crawler/...` and `tests/...`).
+- Use inline comments for intent and platform nuance (examples: Windows lock retry comment in `tests/infrastructure/test_database.py`, precedence notes in `src/mobile_crawler/config/config_manager.py`).
 
 **JSDoc/TSDoc:**
-- Not used - Python uses docstrings instead
-- Docstring format includes Args, Returns, and Examples where appropriate
+- Not applicable (Python codebase). Use Python docstrings instead.
 
 ## Function Design
 
-**Size:**
-- Generally small and focused functions
-- Methods typically under 50 lines
-- Single responsibility principle followed
+**Size:**  
+- Prefer small focused methods for state/query behavior (example: property methods in `src/mobile_crawler/core/stuck_detector.py`).
 
-**Parameters:**
-- Type hints used for all parameters
-- Default values for optional parameters
-- Clear parameter names that indicate purpose
+**Parameters:**  
+- Use explicit typed parameters and defaults for optional behavior (examples: `initialize(..., safety_settings: Optional[Dict[str, Any]] = None)` in `src/mobile_crawler/domain/providers/openrouter_adapter.py`; `crawl(..., provider: Optional[str], ...)` in `src/mobile_crawler/cli/commands/crawl.py`).
 
-**Return Values:**
-- Consistent return types
-- Explicit returns rather than implicit None
-- Union types for multiple return possibilities
+**Return Values:**  
+- Return domain objects/dataclasses for structured data (example: `ActionResult` in `src/mobile_crawler/domain/models.py`).
+- Return `None` for command-style mutators and side-effect methods (example: `ConfigManager.set()` in `src/mobile_crawler/config/config_manager.py`).
 
 ## Module Design
 
-**Exports:**
-- Public API clearly defined through `__init__.py` files
-- Internal modules prefixed with underscore
-- Factory functions and main classes exposed at package level
+**Exports:**  
+- Prefer direct imports from concrete modules instead of barrel re-exports (examples: `from mobile_crawler.infrastructure.database import DatabaseManager` in multiple files).
 
-**Barrel Files:**
-- Used for organizing related functionality
-- Example: `mobile_crawler/cli/main.py` imports all commands and exposes CLI
+**Barrel Files:**  
+- Minimal use; `__init__.py` is mainly package marker (examples: `src/mobile_crawler/__init__.py`, `tests/__init__.py`).
 
 ---
 
-*Convention analysis: 2026-04-05*
+*Convention analysis: 2026-05-01*

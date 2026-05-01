@@ -1,98 +1,81 @@
 # Technology Stack
 
-**Analysis Date:** 2026-04-05
+**Analysis Date:** 2026-05-01
 
 ## Languages
 
 **Primary:**
-- Python 3.9+ - Core application logic, GUI, AI integration, mobile automation
-- JavaScript/TypeScript - DroidRun agent system (external dependency)
+- Python 3.9+ - Core app, CLI/GUI, crawling, integrations in `src/mobile_crawler/` and entrypoints `run_cli.py`, `run_ui.py`.
 
 **Secondary:**
-- QML - UI definition (PySide6/PyQt6 integration)
-- SQL - Database queries
+- PowerShell - Local orchestration scripts in `scripts/start.ps1`.
+- SQL (SQLite dialect) - Schema and persistence in `src/mobile_crawler/infrastructure/database.py` and `src/mobile_crawler/infrastructure/user_config_store.py`.
 
 ## Runtime
 
 **Environment:**
-- Python 3.9+ (support for 3.9, 3.10, 3.11, 3.12)
-- Windows 11 Pro 10.0.26200
-- Shell: bash (via Git)
+- CPython 3.9+ (`requires-python = ">=3.9"` in `pyproject.toml`).
+- Desktop runtime with local Android tooling (`adb`) and optional local services (Appium, MobSF, Ollama) configured in `scripts/start.ps1` and `src/mobile_crawler/config/defaults.py`.
 
 **Package Manager:**
-- pip - Primary package manager
-- setuptools - Build system
-- Lockfile: Not detected (using standard pip/PyPI)
+- pip/setuptools (build backend in `pyproject.toml`).
+- Lockfile: missing at repository root (no `poetry.lock`, `Pipfile.lock`, or `uv.lock` outside submodule `external/droidrun/`).
 
 ## Frameworks
 
 **Core:**
-- PySide6 6.6.0+ - Main UI framework
-- Appium 3.0.0+ - Mobile device automation
-- Qt 6 - GUI framework foundation
+- PySide6 >=6.6.0 - Desktop GUI (`src/mobile_crawler/ui/main_window.py`).
+- Click >=8.1.0 - CLI commands (`src/mobile_crawler/cli/main.py`, `src/mobile_crawler/cli/commands/*.py`).
+- DroidRun (git submodule) - traversal/agent engine loaded from `external/droidrun` via `src/mobile_crawler/domain/droidrun_agent_service.py`.
 
 **Testing:**
-- pytest 7.0.0+ - Test runner
-- pytest-cov 4.0.0+ - Coverage reporting
-- pytest-qt 4.0.0+ - Qt widget testing
+- pytest (configured in `pyproject.toml` and `pytest.ini`).
+- pytest-cov / pytest-qt (dev extras in `pyproject.toml`).
 
 **Build/Dev:**
-- ruff 0.1.0+ - Linter and formatter
-- black 23.0.0+ - Code formatter
-- pre-commit 3.0.0+ - Git hooks
+- setuptools (`pyproject.toml`).
+- Ruff + Black + isort (`pyproject.toml`, `.pre-commit-config.yaml`).
+- pre-commit hooks (`.pre-commit-config.yaml`).
 
 ## Key Dependencies
 
 **Critical:**
-- appium-python-client 3.0.0+ - Mobile automation driver
-- Pillow 10.0.0+ - Image processing for screenshots
-- cryptography 42.0.0+ - Secure configuration and encryption
-- requests 2.31.0+ - HTTP requests for AI APIs
-- click 8.1.0+ - CLI interface
-
-**AI/ML:**
-- google-genai 0.3.0+ - Gemini AI integration
-- ollama 0.2.0+ - Local LLM support
-- pytesseract 0.3.10+ - OCR text recognition
-- easyocr 1.7.0+ - Alternative OCR engine
-- imagehash 4.3.0+ - Image similarity detection
-
-**UI/UX:**
-- PySide6 6.6.0+ - Main Qt bindings
-- reportlab 4.0.0+ - PDF report generation
-- pyyaml 6.0.0+ - Configuration file parsing
+- `google-genai` - Gemini integration in `src/mobile_crawler/domain/providers/gemini_adapter.py`.
+- `requests` - HTTP integrations (OpenRouter, MobSF, OmniParser local) in `src/mobile_crawler/domain/providers/openrouter_adapter.py`, `src/mobile_crawler/infrastructure/mobsf_manager.py`, `src/mobile_crawler/domain/omni_parser_client.py`.
+- `ollama` - local LLM integration in `src/mobile_crawler/domain/providers/ollama_adapter.py`.
+- `PySide6` - application UI in `src/mobile_crawler/ui/`.
+- `cryptography` - secret encryption in `src/mobile_crawler/infrastructure/user_config_store.py`.
 
 **Infrastructure:**
-- psutil 5.9.0+ - System monitoring
-- sqlite3 - Built-in database support
+- `appium-python-client` declared in `pyproject.toml`; Appium server orchestration in `scripts/start.ps1`.
+- `mailosaur` (`requirements.txt`) with service wrapper in `src/mobile_crawler/infrastructure/mailosaur/service.py`.
+- `jinja2` and `dpkt` (`requirements.txt`) for report generation/parsing in `src/mobile_crawler/reporting/generator.py` and `src/mobile_crawler/reporting/parsers/pcap_parser.py`.
+- `easyocr`, `pytesseract`, `imagehash`, `Pillow` for visual analysis in `src/mobile_crawler/domain/grounding/ocr_engine.py` and related modules.
 
 ## Configuration
 
 **Environment:**
-- Configuration via `pyproject.toml` for project metadata
-- Environment variables for API keys (GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY)
-- User configuration stored in app data directory
-- Secrets managed via `CredentialStore` with encryption
+- Configuration precedence is SQLite → `CRAWLER_*` env vars → defaults (`src/mobile_crawler/config/config_manager.py`).
+- Defaults are centralized in `src/mobile_crawler/config/defaults.py`.
+- Secrets are persisted encrypted in `user_config.db` (`src/mobile_crawler/infrastructure/user_config_store.py`).
+- `.env` file present at repo root; use for local environment configuration only (content not analyzed).
 
 **Build:**
-- setuptools as build backend
-- Package structure: `src/` directory layout
-- Entry points: `mobile-crawler-cli` and `mobile-crawler-gui`
+- Packaging and tool config in `pyproject.toml`.
+- CLI/GUI script entrypoints defined in `pyproject.toml` under `[project.scripts]`.
 
 ## Platform Requirements
 
 **Development:**
-- Python 3.9+
-- pip
-- Node.js (npm/npx) - for DroidRun development
-- Docker Desktop - for containerized environments
+- Python 3.9+, pip, and virtualenv.
+- Android Debug Bridge (ADB) for device actions (`src/mobile_crawler/domain/adb_action_executor.py`).
+- Optional Node.js/npx and Docker to run Appium + MobSF via `scripts/start.ps1`.
 
 **Production:**
-- Python 3.9+ runtime
-- ADB (Android Debug Bridge) - for device communication
-- Appium server (can be remote)
-- Optional: Local Ollama server for offline AI
+- Local desktop execution target (CLI/GUI).
+- Android device/emulator connectivity via ADB.
+- Optional local services for advanced features: Ollama (`http://localhost:11434`), MobSF (`http://localhost:8000`), Appium (`127.0.0.1:4723`).
 
 ---
 
-*Stack analysis: 2026-04-05*
+*Stack analysis: 2026-05-01*
