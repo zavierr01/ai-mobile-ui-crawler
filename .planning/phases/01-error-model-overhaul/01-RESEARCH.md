@@ -473,21 +473,16 @@ except Exception as e:
 | A4 | The `on_error` listener signature can remain unchanged if we pass `CrawlerError` instances | Pitfall 2 | If listeners inspect `error` type attributes, they may need updates |
 | A5 | The `database.py:305` migration catch can be narrowed to `sqlite3.OperationalError` safely | Pitfall 5 | If other exception types occur during migration, they would no longer be silenced |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `DroidRunLogHandler.emit` (droidrun_agent_service.py:76-93) remain a defensive catch?**
-   - What we know: It writes to a JSONL file and calls `_emit_event`. A failure here could cause infinite recursion if the error path triggers another log.
-   - What's unclear: Whether there is a real recursion risk or it is theoretical.
-   - Recommendation: Keep the catch but log the error instead of bare `pass`. This is a logging infrastructure handler, not a crawl-critical path.
+   - RESOLVED: Keep the catch but log the error instead of bare `pass`. This is a logging infrastructure handler, not a crawl-critical path.
 
 2. **Should `_initialize_omni_parser` (droidrun_agent_service.py:289-305) failure be fatal or degraded?**
-   - What we know: Current code catches the failure, logs a warning, and sets clients to None. Crawl continues without OmniParser.
-   - What's unclear: Whether OmniParser is essential for DroidRun operation.
-   - Recommendation: Keep as degraded mode (warning + None). OmniParser is optional enhancement, not crawl-critical.
+   - RESOLVED: Keep as degraded mode (warning + None). OmniParser is optional enhancement, not crawl-critical.
 
 3. **Should `crawl_state_machine.py:97` listener exception catch be modified?**
-   - What we know: State machine catches listener exceptions with `except Exception: pass`. This is a UI notification path.
-   - Recommendation: Keep the catch but log the exception. State machine listener failures should not break transitions.
+   - RESOLVED: Keep the catch but log the exception. State machine listener failures should not break transitions.
 
 ## Environment Availability
 
