@@ -1,11 +1,16 @@
 """Repository for managing crawl runs in crawler.db."""
 
+import logging
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 from contextlib import closing
 
+from mobile_crawler.domain.errors import ErrorContext, RecorderError
 from mobile_crawler.infrastructure.database import DatabaseManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -45,32 +50,39 @@ class RunRepository:
         Returns:
             The ID of the newly created run
         """
-        with closing(self.db_manager.get_connection()) as conn:
-            cursor = conn.cursor()
+        try:
+            with closing(self.db_manager.get_connection()) as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                INSERT INTO runs (
-                    device_id, app_package, start_activity, start_time, end_time,
-                    status, ai_provider, ai_model, total_steps, unique_screens,
-                    session_path
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                run.device_id,
-                run.app_package,
-                run.start_activity,
-                run.start_time.isoformat(),
-                run.end_time.isoformat() if run.end_time else None,
-                run.status,
-                run.ai_provider,
-                run.ai_model,
-                run.total_steps,
-                run.unique_screens,
-                run.session_path
-            ))
+                cursor.execute("""
+                    INSERT INTO runs (
+                        device_id, app_package, start_activity, start_time, end_time,
+                        status, ai_provider, ai_model, total_steps, unique_screens,
+                        session_path
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    run.device_id,
+                    run.app_package,
+                    run.start_activity,
+                    run.start_time.isoformat(),
+                    run.end_time.isoformat() if run.end_time else None,
+                    run.status,
+                    run.ai_provider,
+                    run.ai_model,
+                    run.total_steps,
+                    run.unique_screens,
+                    run.session_path
+                ))
 
-            run_id = cursor.lastrowid
-            conn.commit()
-            return run_id
+                run_id = cursor.lastrowid
+                conn.commit()
+                return run_id
+        except sqlite3.OperationalError as e:
+            raise RecorderError(
+                f"Failed to create run: {e}",
+                context=ErrorContext(),
+                cause=e,
+            ) from e
 
     def get_run_by_id(self, run_id: int) -> Optional[Run]:
         """Get a run by ID.
@@ -150,33 +162,40 @@ class RunRepository:
         if run.id is None:
             return False
 
-        with closing(self.db_manager.get_connection()) as conn:
-            cursor = conn.cursor()
+        try:
+            with closing(self.db_manager.get_connection()) as conn:
+                cursor = conn.cursor()
 
-            cursor.execute("""
-                UPDATE runs SET
-                    device_id = ?, app_package = ?, start_activity = ?, start_time = ?,
-                    end_time = ?, status = ?, ai_provider = ?, ai_model = ?,
-                    total_steps = ?, unique_screens = ?, session_path = ?
-                WHERE id = ?
-            """, (
-                run.device_id,
-                run.app_package,
-                run.start_activity,
-                run.start_time.isoformat(),
-                run.end_time.isoformat() if run.end_time else None,
-                run.status,
-                run.ai_provider,
-                run.ai_model,
-                run.total_steps,
-                run.unique_screens,
-                run.session_path,
-                run.id
-            ))
+                cursor.execute("""
+                    UPDATE runs SET
+                        device_id = ?, app_package = ?, start_activity = ?, start_time = ?,
+                        end_time = ?, status = ?, ai_provider = ?, ai_model = ?,
+                        total_steps = ?, unique_screens = ?, session_path = ?
+                    WHERE id = ?
+                """, (
+                    run.device_id,
+                    run.app_package,
+                    run.start_activity,
+                    run.start_time.isoformat(),
+                    run.end_time.isoformat() if run.end_time else None,
+                    run.status,
+                    run.ai_provider,
+                    run.ai_model,
+                    run.total_steps,
+                    run.unique_screens,
+                    run.session_path,
+                    run.id
+                ))
 
-            updated = cursor.rowcount > 0
-            conn.commit()
-            return updated
+                updated = cursor.rowcount > 0
+                conn.commit()
+                return updated
+        except sqlite3.OperationalError as e:
+            raise RecorderError(
+                f"Failed to update run_id={run.id}: {e}",
+                context=ErrorContext(run_id=run.id),
+                cause=e,
+            ) from e
 
     def update_run_stats(
         self,
@@ -198,33 +217,40 @@ class RunRepository:
         Returns:
             True if run was updated, False if not found
         """
-        with closing(self.db_manager.get_connection()) as conn:
-            cursor = conn.cursor()
+        try:
+            with closing(self.db_manager.get_connection()) as conn:
+                cursor = conn.cursor()
 
-            if status is not None and end_time is not None:
-                cursor.execute("""
-                    UPDATE runs SET total_steps = ?, unique_screens = ?, status = ?, end_time = ?
-                    WHERE id = ?
-                """, (total_steps, unique_screens, status, end_time.isoformat() if end_time else None, run_id))
-            elif status is not None:
-                cursor.execute("""
-                    UPDATE runs SET total_steps = ?, unique_screens = ?, status = ?
-                    WHERE id = ?
-                """, (total_steps, unique_screens, status, run_id))
-            elif end_time is not None:
-                cursor.execute("""
-                    UPDATE runs SET total_steps = ?, unique_screens = ?, end_time = ?
-                    WHERE id = ?
-                """, (total_steps, unique_screens, end_time.isoformat() if end_time else None, run_id))
-            else:
-                cursor.execute("""
-                    UPDATE runs SET total_steps = ?, unique_screens = ?
-                    WHERE id = ?
-                """, (total_steps, unique_screens, run_id))
+                if status is not None and end_time is not None:
+                    cursor.execute("""
+                        UPDATE runs SET total_steps = ?, unique_screens = ?, status = ?, end_time = ?
+                        WHERE id = ?
+                    """, (total_steps, unique_screens, status, end_time.isoformat() if end_time else None, run_id))
+                elif status is not None:
+                    cursor.execute("""
+                        UPDATE runs SET total_steps = ?, unique_screens = ?, status = ?
+                        WHERE id = ?
+                    """, (total_steps, unique_screens, status, run_id))
+                elif end_time is not None:
+                    cursor.execute("""
+                        UPDATE runs SET total_steps = ?, unique_screens = ?, end_time = ?
+                        WHERE id = ?
+                    """, (total_steps, unique_screens, end_time.isoformat() if end_time else None, run_id))
+                else:
+                    cursor.execute("""
+                        UPDATE runs SET total_steps = ?, unique_screens = ?
+                        WHERE id = ?
+                    """, (total_steps, unique_screens, run_id))
 
-            updated = cursor.rowcount > 0
-            conn.commit()
-            return updated
+                updated = cursor.rowcount > 0
+                conn.commit()
+                return updated
+        except sqlite3.OperationalError as e:
+            raise RecorderError(
+                f"Failed to update run stats for run_id={run_id}: {e}",
+                context=ErrorContext(run_id=run_id),
+                cause=e,
+            ) from e
 
     def update_session_path(self, run_id: int, session_path: str) -> bool:
         """Update the session folder path for a run.
@@ -236,17 +262,24 @@ class RunRepository:
         Returns:
             True if run was updated, False if not found
         """
-        with closing(self.db_manager.get_connection()) as conn:
-            cursor = conn.cursor()
+        try:
+            with closing(self.db_manager.get_connection()) as conn:
+                cursor = conn.cursor()
 
-            cursor.execute(
-                "UPDATE runs SET session_path = ? WHERE id = ?",
-                (session_path, run_id)
-            )
+                cursor.execute(
+                    "UPDATE runs SET session_path = ? WHERE id = ?",
+                    (session_path, run_id)
+                )
 
-            updated = cursor.rowcount > 0
-            conn.commit()
-            return updated
+                updated = cursor.rowcount > 0
+                conn.commit()
+                return updated
+        except sqlite3.OperationalError as e:
+            raise RecorderError(
+                f"Failed to update session path for run_id={run_id}: {e}",
+                context=ErrorContext(run_id=run_id),
+                cause=e,
+            ) from e
 
     def delete_run(self, run_id: int) -> bool:
         """Delete a run and all related data (cascading delete).
@@ -257,33 +290,40 @@ class RunRepository:
         Returns:
             True if run was deleted, False if not found
         """
-        with closing(self.db_manager.get_connection()) as conn:
-            cursor = conn.cursor()
+        try:
+            with closing(self.db_manager.get_connection()) as conn:
+                cursor = conn.cursor()
 
-            # Check if run exists first
-            cursor.execute("SELECT id FROM runs WHERE id = ?", (run_id,))
-            if cursor.fetchone() is None:
-                return False
+                # Check if run exists first
+                cursor.execute("SELECT id FROM runs WHERE id = ?", (run_id,))
+                if cursor.fetchone() is None:
+                    return False
 
-            # Delete in order to respect foreign key constraints
-            # ai_interactions first (no dependencies)
-            cursor.execute("DELETE FROM ai_interactions WHERE run_id = ?", (run_id,))
+                # Delete in order to respect foreign key constraints
+                # ai_interactions first (no dependencies)
+                cursor.execute("DELETE FROM ai_interactions WHERE run_id = ?", (run_id,))
 
-            # transitions next
-            cursor.execute("DELETE FROM transitions WHERE run_id = ?", (run_id,))
+                # transitions next
+                cursor.execute("DELETE FROM transitions WHERE run_id = ?", (run_id,))
 
-            # step_logs next
-            cursor.execute("DELETE FROM step_logs WHERE run_id = ?", (run_id,))
+                # step_logs next
+                cursor.execute("DELETE FROM step_logs WHERE run_id = ?", (run_id,))
 
-            # run_stats
-            cursor.execute("DELETE FROM run_stats WHERE run_id = ?", (run_id,))
+                # run_stats
+                cursor.execute("DELETE FROM run_stats WHERE run_id = ?", (run_id,))
 
-            # Finally delete the run itself
-            cursor.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                # Finally delete the run itself
+                cursor.execute("DELETE FROM runs WHERE id = ?", (run_id,))
 
-            deleted = cursor.rowcount > 0
-            conn.commit()
-            return deleted
+                deleted = cursor.rowcount > 0
+                conn.commit()
+                return deleted
+        except sqlite3.OperationalError as e:
+            raise RecorderError(
+                f"Failed to delete run_id={run_id}: {e}",
+                context=ErrorContext(run_id=run_id),
+                cause=e,
+            ) from e
 
     def get_run_count(self) -> int:
         """Get total number of runs in the database.

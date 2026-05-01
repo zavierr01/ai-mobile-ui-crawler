@@ -1,10 +1,13 @@
 """Database management for crawler.db - crawl data storage."""
 
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Optional
 
 from mobile_crawler.config import get_app_data_dir
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
@@ -244,6 +247,20 @@ class DatabaseManager:
             )
         """)
 
+        # omni_parser_cache table for OmniParser results
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS omni_parser_cache (
+                id INTEGER PRIMARY KEY,
+                screen_key TEXT NOT NULL,
+                backend TEXT NOT NULL,
+                elements_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_accessed_at TEXT NOT NULL,
+                access_count INTEGER DEFAULT 1,
+                UNIQUE(screen_key, backend)
+            )
+        """)
+
         # Create indexes for performance
         conn.execute("CREATE INDEX IF NOT EXISTS idx_step_logs_run ON step_logs(run_id, step_number)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_screens_hash ON screens(composite_hash)")
@@ -251,43 +268,44 @@ class DatabaseManager:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_run_stats_run ON run_stats(run_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_ai_interactions_run ON ai_interactions(run_id, step_number)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_omni_cache_screen ON omni_parser_cache(screen_key)")
 
         conn.commit()
 
     def migrate_schema(self):
         """Run database migrations if needed."""
         self.create_schema()
-        
+
         conn = self.get_connection()
         try:
             # Migration for runs.session_path
             cursor = conn.execute("PRAGMA table_info(runs)")
-            columns = [row['name'] for row in cursor.fetchall()]
-            if 'session_path' not in columns:
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "session_path" not in columns:
                 conn.execute("ALTER TABLE runs ADD COLUMN session_path TEXT")
 
             # Migration for step_logs recovery columns
             cursor = conn.execute("PRAGMA table_info(step_logs)")
-            columns = [row['name'] for row in cursor.fetchall()]
-            if 'was_retried' not in columns:
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "was_retried" not in columns:
                 conn.execute("ALTER TABLE step_logs ADD COLUMN was_retried BOOLEAN DEFAULT 0")
-            if 'retry_count' not in columns:
+            if "retry_count" not in columns:
                 conn.execute("ALTER TABLE step_logs ADD COLUMN retry_count INTEGER DEFAULT 0")
-            if 'recovery_time_ms' not in columns:
+            if "recovery_time_ms" not in columns:
                 conn.execute("ALTER TABLE step_logs ADD COLUMN recovery_time_ms REAL")
-            
+
             # Migration for run_stats recovery columns
             cursor = conn.execute("PRAGMA table_info(run_stats)")
-            columns = [row['name'] for row in cursor.fetchall()]
-            if 'uiautomator_crash_count' not in columns:
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "uiautomator_crash_count" not in columns:
                 conn.execute("ALTER TABLE run_stats ADD COLUMN uiautomator_crash_count INTEGER DEFAULT 0")
-            if 'uiautomator_recovery_count' not in columns:
+            if "uiautomator_recovery_count" not in columns:
                 conn.execute("ALTER TABLE run_stats ADD COLUMN uiautomator_recovery_count INTEGER DEFAULT 0")
-            if 'avg_recovery_time_ms' not in columns:
+            if "avg_recovery_time_ms" not in columns:
                 conn.execute("ALTER TABLE run_stats ADD COLUMN avg_recovery_time_ms REAL")
-            
+
             conn.commit()
-        except Exception:
-            pass
+        except sqlite3.OperationalError as e:
+            logger.warning(f"Schema migration step skipped (may already exist): {e}")
         finally:
             conn.close()
