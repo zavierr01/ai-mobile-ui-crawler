@@ -46,8 +46,17 @@ class TestConfigManager:
 
     def test_precedence_defaults(self):
         """Test that defaults are used when no other source."""
-        config = ConfigManager()
-        assert config.get('max_crawl_steps') == 15
+        with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+            db_path = Path(f.name)
+
+        try:
+            user_store = UserConfigStore(db_path)
+            user_store.create_schema()
+            config = ConfigManager(user_store)
+            assert config.get('max_crawl_steps') == 15
+            user_store.close()
+        finally:
+            db_path.unlink(missing_ok=True)
 
     def test_precedence_fallback_to_provided_default(self):
         """Test fallback to provided default."""

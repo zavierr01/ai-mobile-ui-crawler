@@ -11,10 +11,10 @@ class TestCrawlState:
     def test_enum_values(self):
         """Test that all expected states exist."""
         expected_states = [
-            "uninitialized", "initializing", "running", "paused_manual", 
-            "stopping", "stopped", "error"
+            "uninitialized", "initializing", "running", "paused_manual",
+            "paused_step", "stopping", "stopped", "error"
         ]
-        
+
         actual_states = [state.value for state in CrawlState]
         assert set(actual_states) == set(expected_states)
 
