@@ -207,9 +207,9 @@ class TestAIInteractionService:
         with pytest.raises(ValueError, match="Invalid action type"):
             service._parse_ai_response(response_text)
         
-        # Missing bounding box
+        # Missing bounding box and label_id
         response_text = '{"actions": [{"action": "click", "action_desc": "test", "reasoning": "test"}], "signup_completed": false}'
-        with pytest.raises(ValueError, match="missing required field"):
+        with pytest.raises(ValueError, match="requires target_bounding_box or label_id"):
             service._parse_ai_response(response_text)
         
         # Input action without input_text
@@ -219,5 +219,5 @@ class TestAIInteractionService:
         
         # Non-input action with input_text
         response_text = '{"actions": [{"action": "click", "action_desc": "test", "target_bounding_box": {"top_left": [0,0], "bottom_right": [10,10]}, "input_text": "should not be here", "reasoning": "test"}], "signup_completed": false}'
-        with pytest.raises(ValueError, match="Only input actions can have input_text"):
+        with pytest.raises(ValueError, match="cannot have input_text"):
             service._parse_ai_response(response_text)
