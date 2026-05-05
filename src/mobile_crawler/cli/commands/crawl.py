@@ -166,6 +166,40 @@ class JSONEventListener(CrawlerEventListener):
         }
         print(json.dumps(event), flush=True)
 
+    def on_debug_log(self, run_id: int, step_number: int, message: str) -> None:
+        """Handle debug log event."""
+        event = {
+            "event": "debug_log",
+            "run_id": run_id,
+            "step_number": step_number,
+            "message": message,
+            "timestamp": datetime.now().isoformat()
+        }
+        print(json.dumps(event), flush=True)
+
+    def on_ocr_completed(self, run_id: int, step_number: int, duration_ms: float, element_count: int) -> None:
+        """Handle OCR completed event."""
+        event = {
+            "event": "ocr_completed",
+            "run_id": run_id,
+            "step_number": step_number,
+            "duration_ms": duration_ms,
+            "element_count": element_count,
+            "timestamp": datetime.now().isoformat()
+        }
+        print(json.dumps(event), flush=True)
+
+    def on_screenshot_timing(self, run_id: int, step_number: int, duration_ms: float) -> None:
+        """Handle screenshot timing event."""
+        event = {
+            "event": "screenshot_timing",
+            "run_id": run_id,
+            "step_number": step_number,
+            "duration_ms": duration_ms,
+            "timestamp": datetime.now().isoformat()
+        }
+        print(json.dumps(event), flush=True)
+
 
 @click.command()
 @click.option('--device', required=True, help='Device ID to crawl')

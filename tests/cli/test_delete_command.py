@@ -47,7 +47,7 @@ class TestDeleteCommand:
         )
         
         mock_run_repo = Mock()
-        mock_run_repo.get_run.return_value = mock_run
+        mock_run_repo.get_run_by_id.return_value = mock_run
         mock_run_repo.delete_run.return_value = True
         mock_run_repo_cls.return_value = mock_run_repo
         
@@ -92,7 +92,7 @@ class TestDeleteCommand:
         )
         
         mock_run_repo = Mock()
-        mock_run_repo.get_run.return_value = mock_run
+        mock_run_repo.get_run_by_id.return_value = mock_run
         mock_run_repo.delete_run.return_value = True
         mock_run_repo_cls.return_value = mock_run_repo
         
@@ -132,7 +132,7 @@ class TestDeleteCommand:
         )
         
         mock_run_repo = Mock()
-        mock_run_repo.get_run.return_value = mock_run
+        mock_run_repo.get_run_by_id.return_value = mock_run
         mock_run_repo_cls.return_value = mock_run_repo
         
         mock_session_folder_manager = Mock()
@@ -155,7 +155,7 @@ class TestDeleteCommand:
         mock_db_manager_cls.return_value = mock_db_manager
         
         mock_run_repo = Mock()
-        mock_run_repo.get_run.return_value = None
+        mock_run_repo.get_run_by_id.return_value = None
         mock_run_repo_cls.return_value = mock_run_repo
         
         mock_session_folder_manager = Mock()
@@ -200,7 +200,7 @@ class TestDeleteCommand:
         )
         
         mock_run_repo = Mock()
-        mock_run_repo.get_run.return_value = mock_run
+        mock_run_repo.get_run_by_id.return_value = mock_run
         mock_run_repo.delete_run.side_effect = Exception('Database connection failed')
         mock_run_repo_cls.return_value = mock_run_repo
         
