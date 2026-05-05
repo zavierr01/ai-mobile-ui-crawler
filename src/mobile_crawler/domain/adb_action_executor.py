@@ -29,6 +29,7 @@ class ADBActionExecutor:
         self.adb_client = adb_client or ADBClient()
         self._last_action_time = 0
         self._action_delay_ms = 1500  # 1.5s between actions for stability
+        self._launcher_activity_cache: dict[str, str] = {}
 
     def _ensure_delay(self) -> None:
         """Ensure minimum delay between actions."""
@@ -462,6 +463,151 @@ class ADBActionExecutor:
         except Exception as e:
             logger.error(f"Failed to get current activity: {e}")
             return None
+
+    def resolve_launcher_activity(self, package_name: str) -> Optional[str]:
+        """Resolve the main launcher activity for a given package.
+
+        Per D-07: Always recovers to the main launcher activity, never a deep activity.
+        Uses adb shell cmd package resolve-activity first, falls back to
+        dumpsys package parsing if resolution fails. Results are cached
+        per package so we only resolve once.
+
+        Args:
+            package_name: App package name (e.g., 'com.example.app').
+
+        Returns:
+            Launcher activity component (e.g., '.MainActivity') or None if
+            resolution fails.
+        """
+        # Return cached result if available
+        if package_name in self._launcher_activity_cache:
+            return self._launcher_activity_cache[package_name]
+
+        # Primary method: resolve-activity --brief
+        try:
+            success, output, _ = self._execute_adb_command([
+                'shell',
+                'cmd package resolve-activity --brief '
+                '-c android.intent.category.LAUNCHER ' + package_name,
+            ])
+
+            if success and output:
+                lines = output.strip().split('\n')
+                # Output format:
+                #   Line 0: category header (e.g., "android.intent.category.LAUNCHER")
+                #   Line 1: component (e.g., "com.example.app/com.example.app.MainActivity")
+                for line in lines:
+                    line = line.strip()
+                    if line and '/' in line:
+                        # Extract activity part after the slash
+                        _, activity = line.rsplit('/', 1)
+                        activity = activity.strip()
+                        if activity:
+                            self._launcher_activity_cache[package_name] = activity
+                            logger.debug(
+                                f"Resolved launcher activity for {package_name}: "
+                                f"{activity} (via resolve-activity)"
+                            )
+                            return activity
+        except Exception as e:
+            logger.debug(f"resolve-activity failed for {package_name}: {e}")
+
+        # Fallback method: dumpsys package parsing for MAIN+LAUNCHER intent filter
+        try:
+            success, output, _ = self._execute_adb_command([
+                'shell',
+                f'dumpsys package {package_name}',
+            ])
+
+            if success and output:
+                # Search for MAIN action followed by LAUNCHER category
+                lines = output.strip().split('\n')
+                found_main = False
+                for line in lines:
+                    stripped = line.strip()
+                    if 'android.intent.action.MAIN' in stripped:
+                        found_main = True
+                        continue
+                    if found_main and 'android.intent.category.LAUNCHER' in stripped:
+                        # The activity name is typically in a preceding
+                        # "Activity" line or we scan backwards
+                        continue
+                    if found_main:
+                        # Look for the activity component pattern
+                        match = re.search(
+                            rf'{re.escape(package_name)}/([a-zA-Z0-9_.]+)',
+                            stripped,
+                        )
+                        if match:
+                            activity = match.group(1)
+                            self._launcher_activity_cache[package_name] = activity
+                            logger.debug(
+                                f"Resolved launcher activity for {package_name}: "
+                                f"{activity} (via dumpsys)"
+                            )
+                            return activity
+                        found_main = False
+        except Exception as e:
+            logger.debug(f"dumpsys package fallback failed for {package_name}: {e}")
+
+        logger.warning(f"Could not resolve launcher activity for {package_name}")
+        return None
+
+    def am_start_recovery(self, package_name: str) -> ActionResult:
+        """Recover from an app switch by relaunching the target app.
+
+        Per D-05: Uses `adb shell am start` with the launcher activity to
+        navigate back to the target app. Per D-07: always launches to the
+        main launcher activity, never a deep activity. Falls back to monkey
+        if launcher activity resolution fails.
+
+        Args:
+            package_name: App package name to recover to.
+
+        Returns:
+            ActionResult with action_type="am_start_recovery" and navigated_away
+            set to False (we're navigating *back* to the target app).
+        """
+        launcher_activity = self.resolve_launcher_activity(package_name)
+
+        start_time = time.time()
+
+        if launcher_activity:
+            # Primary path: am start with resolved launcher activity (per D-05)
+            success, output, duration_ms = self._execute_adb_command([
+                'shell',
+                f'am start -n {package_name}/{launcher_activity}',
+            ])
+
+            # Add post-launch delay to allow activity to start (per D-07)
+            time.sleep(0.5)
+
+            return ActionResult(
+                success=success,
+                action_type="am_start_recovery",
+                target=f"{package_name}/{launcher_activity}",
+                duration_ms=duration_ms,
+                error_message=output if not success else None,
+                navigated_away=False,
+            )
+        else:
+            # Fallback: monkey launcher (if resolver fails)
+            success, output, duration_ms = self._execute_adb_command([
+                'shell', 'monkey', '-p', package_name, '-c',
+                'android.intent.category.LAUNCHER', '1',
+            ])
+
+            # Add post-launch delay for monkey fallback too
+            time.sleep(0.5)
+
+            return ActionResult(
+                success=success,
+                action_type="am_start_recovery",
+                target=package_name,
+                duration_ms=duration_ms,
+                error_message=output if not success else None,
+                navigated_away=False,
+            )
 
     def launch_app(self, package_name: str) -> ActionResult:
         """Launch an app by package name.
