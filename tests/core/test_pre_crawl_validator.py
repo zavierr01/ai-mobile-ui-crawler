@@ -1,6 +1,6 @@
 """Tests for PreCrawlValidator."""
 
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -8,6 +8,24 @@ from mobile_crawler.core.pre_crawl_validator import (
     PreCrawlValidator,
     ValidationError,
 )
+
+
+def _make_config_manager(**overrides):
+    """Create a mock ConfigManager with sensible defaults."""
+    defaults = {
+        "enable_mobsf_analysis": False,
+        "enable_traffic_capture": False,
+        "enable_video_recording": False,
+        "mobsf_api_url": "http://localhost:8000",
+        "mobsf_api_key": "test_key",
+        "pcapdroid_package": "com.emanuelef.android.apps.pcapdroid",
+        "adb_executable_path": "adb",
+        "VIDEO_RECORDING_AVAILABLE": True,
+    }
+    defaults.update(overrides)
+    config = Mock()
+    config.get.side_effect = lambda key, default=None: defaults.get(key, default)
+    return config
 
 
 class TestValidationError:
@@ -58,15 +76,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -87,15 +103,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -106,12 +120,10 @@ class TestPreCrawlValidator:
             ai_model="gemini-pro-vision",
         )
 
-        # Should have device error and pcapdroid warning (since no device connected)
-        assert len(errors) == 2
+        # Should have only device error (optional features disabled)
+        assert len(errors) == 1
         assert errors[0].field == "device"
         assert errors[0].severity == "error"
-        assert errors[1].field == "pcapdroid"
-        assert errors[1].severity == "warning"
 
     def test_validate_device_not_connected(self):
         """Test validation with specific device not connected."""
@@ -123,15 +135,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -156,15 +166,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -188,15 +196,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -221,14 +227,12 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -253,14 +257,12 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -285,15 +287,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")  # Different model
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -319,13 +319,12 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
         mock_creds = Mock()
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -351,14 +350,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
         mock_creds = Mock()
         mock_creds.get.return_value = None  # No API key
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -383,14 +381,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gpt-4-vision")
         ]
-        mock_config = Mock()
         mock_creds = Mock()
         mock_creds.get.return_value = None  # No API key
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -415,13 +412,12 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="llama3.2-vision")
         ]
-        mock_config = Mock()
         mock_creds = Mock()
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -436,7 +432,8 @@ class TestPreCrawlValidator:
         api_key_errors = [e for e in errors if e.field == "gemini_api_key" or e.field == "openrouter_api_key"]
         assert len(api_key_errors) == 0
 
-    def test_validate_mobsf_not_configured(self):
+    @patch("requests.get")
+    def test_validate_mobsf_not_configured(self, mock_requests_get):
         """Test MobSF warning when not configured."""
         mock_device = Mock()
         mock_device.get_connected_devices.return_value = [
@@ -446,14 +443,16 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = None  # Not configured
         mock_creds = Mock()
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(
+                enable_mobsf_analysis=True,
+                mobsf_api_url=None,
+                mobsf_api_key=None,
+            ),
             credential_store=mock_creds,
         )
 
@@ -468,7 +467,8 @@ class TestPreCrawlValidator:
         assert len(mobsf_warnings) == 1
         assert mobsf_warnings[0].severity == "warning"
 
-    def test_validate_pcapdroid_not_installed(self):
+    @patch("subprocess.run")
+    def test_validate_pcapdroid_not_installed(self, mock_subprocess_run):
         """Test PCAPdroid warning when not installed."""
         mock_device = Mock()
         mock_device.get_connected_devices.return_value = [
@@ -478,14 +478,18 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = False  # Not installed
         mock_creds = Mock()
+
+        # Mock subprocess to simulate PCAPdroid not found
+        mock_result = Mock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        mock_subprocess_run.return_value = mock_result
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(enable_traffic_capture=True),
             credential_store=mock_creds,
         )
 
@@ -510,14 +514,15 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = False  # Not available
         mock_creds = Mock()
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(
+                enable_video_recording=True,
+                VIDEO_RECORDING_AVAILABLE=False,
+            ),
             credential_store=mock_creds,
         )
 
@@ -540,15 +545,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -571,14 +574,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -601,14 +603,16 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = None  # MobSF not configured
         mock_creds = Mock()
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(
+                enable_mobsf_analysis=True,
+                mobsf_api_url=None,
+                mobsf_api_key=None,
+            ),
             credential_store=mock_creds,
         )
 
@@ -629,15 +633,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
         mock_creds.get.return_value = "api_key"
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -658,15 +660,13 @@ class TestPreCrawlValidator:
         mock_model.get_vision_models.return_value = [
             Mock(id="gemini-pro-vision")
         ]
-        mock_config = Mock()
-        mock_config.get.return_value = "configured_value"  # Avoid optional warnings
         mock_creds = Mock()
         mock_creds.get.return_value = None
 
         validator = PreCrawlValidator(
             device_detector=mock_device,
             model_detector=mock_model,
-            config_manager=mock_config,
+            config_manager=_make_config_manager(),
             credential_store=mock_creds,
         )
 
@@ -677,9 +677,8 @@ class TestPreCrawlValidator:
             ai_model="gemini-pro-vision",
         )
 
-        # Should have errors for device, app, and API key, plus pcapdroid warning
-        assert len(errors) == 3
+        # Should have errors for device and API key only
+        assert len(errors) == 2
         error_fields = [e.field for e in errors]
         assert "device" in error_fields
         assert "gemini_api_key" in error_fields
-        assert "pcapdroid" in error_fields
