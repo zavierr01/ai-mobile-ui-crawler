@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: Error Model Overhaul** - Replace blanket exception handling with typed taxonomy and structured failure context
 - [ ] **Phase 2: Remove Appium** - Eliminate Appium provider, consolidate to single ADB/DroidRun device path
-- [ ] **Phase 3: Step State Machine & UI Sync** - Durable step phases with persisted transitions and explicit wait/verify actions
+- [x] **Phase 3: Step State Machine & UI Sync** - Durable step phases with persisted transitions and explicit wait/verify actions
 - [ ] **Phase 4: ADB Context Guardrails** - Capture device context per step, validate UI dumps, detect and recover from app switches
 - [ ] **Phase 5: Test Coverage & Reliability** - Fix all failing tests, add unit tests for main/base functionality modules
 
@@ -73,7 +73,7 @@ Plans:
 - [x] 03-03: Replace fixed sleeps with explicit wait predicates (SYNC-01)
 **Wave 2** *(blocked on Wave 1 completion)*
 - [x] 03-02: Add step observability queries and event listener callback (DURB-03)
-- [ ] 03-04: Wire action verifier, adaptive wait, and event stream into DroidRun (SYNC-02, SYNC-03)
+- [x] 03-04: Wire action verifier, adaptive wait, and event stream into DroidRun (SYNC-02, SYNC-03)
 
 ### Phase 4: ADB Context Guardrails
 **Goal**: Device context is captured and validated every step, with automatic recovery from unintended app switches
@@ -86,9 +86,12 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 04-01: Capture and persist package/activity context per step
-- [ ] 04-02: Add UI tree dump validation before decision processing
-- [ ] 04-03: Implement app-switch detection and recovery
+**Wave 1**
+- [ ] 04-01: Extend data model, DB schema, and context capture for package/activity persistence (CTX-01)
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 04-02: Add UI dump validation gate and context pre-check before DECIDE (CTX-02)
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 04-03: Implement app-switch detection and automatic recovery with am start (CTX-03)
 
 ### Phase 5: Test Coverage & Reliability
 **Goal**: All main/base functionality modules have reliable unit tests and the entire test suite passes with zero failures
@@ -115,6 +118,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 |-------|----------------|--------|-----------|
 | 1. Error Model Overhaul | 3/3 | Complete | 2026-05-01 |
 | 2. Remove Appium | 3/3 | Complete | 2026-05-01 |
-| 3. Step State Machine & UI Sync | 3/4 | In progress | - |
+| 3. Step State Machine & UI Sync | 4/4 | Complete | 2026-05-05 |
 | 4. ADB Context Guardrails | 0/3 | Not started | - |
 | 5. Test Coverage & Reliability | 0/2 | Not started | - |
