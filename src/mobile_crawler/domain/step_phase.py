@@ -16,8 +16,10 @@ class StepPhase(Enum):
 
 
 # Valid transition map: each phase can only transition to its listed successor(s).
+# CAPTURE can transition to DECIDE (normal flow) or CHECKPOINT (skip flow when
+# context pre-check or UI dump validation fails).
 VALID_TRANSITIONS = {
-    StepPhase.CAPTURE: [StepPhase.DECIDE],
+    StepPhase.CAPTURE: [StepPhase.DECIDE, StepPhase.CHECKPOINT],
     StepPhase.DECIDE: [StepPhase.EXECUTE],
     StepPhase.EXECUTE: [StepPhase.RECORD],
     StepPhase.RECORD: [StepPhase.CHECKPOINT],

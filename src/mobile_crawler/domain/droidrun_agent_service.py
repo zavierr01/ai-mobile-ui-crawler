@@ -15,6 +15,7 @@ from mobile_crawler.config.config_manager import ConfigManager
 from mobile_crawler.domain.models import ActionResult, AIResponse, AIAction, BoundingBox
 from mobile_crawler.infrastructure.ai_interaction_repository import AIInteraction, AIInteractionRepository
 
+from mobile_crawler.domain.context_guard import DeviceContextCapture, UIDumpValidator, StepSkipReason
 from mobile_crawler.domain.step_phase import StepPhase, StepPhaseStateMachine
 from mobile_crawler.domain.step_phase_models import StepPhaseTransition
 from mobile_crawler.infrastructure.step_phase_repository import StepPhaseRepository
@@ -357,13 +358,19 @@ class DroidRunAgentService:
         self._ui_wait_predicate = None  # Wired after agent init
         self._action_verifier = None    # Wired after agent init
 
+        # Context guardrails (Plan 02: UI dump validation + app mismatch detection)
+        self._context_capture: Optional[DeviceContextCapture] = None
+        self._ui_dump_validator = UIDumpValidator()
+        self._target_package: Optional[str] = None
+        self._current_device_context = None  # Set during context capture for downstream recovery
+
         logger.info(f"Step phase tracking initialized for run {run_id}")
 
     def _wire_observers_to_agent(self) -> None:
-        """Wire UIWaitPredicate and ActionVerifier to DroidRun's state_provider and driver.
+        """Wire UIWaitPredicate, ActionVerifier, and DeviceContextCapture to DroidRun.
 
-        Called after DroidRun agent is initialized, when state_provider and driver
-        are available on the agent object.
+        Called after DroidRun agent is initialized, when state_provider, driver,
+        and ADB executor are available on the agent object.
         """
         if not self._droid_agent:
             return
@@ -381,6 +388,20 @@ class DroidRunAgentService:
                     state_provider=state_provider,
                     driver=driver,
                 )
+
+        # Wire DeviceContextCapture for app-switch detection (Plan 02)
+        if self._target_package and driver:
+            from mobile_crawler.domain.adb_action_executor import ADBActionExecutor
+
+            adb_executor = ADBActionExecutor(device_id=self.device_id)
+            self._context_capture = DeviceContextCapture(
+                target_package=self._target_package,
+                adb_executor=adb_executor,
+            )
+            logger.info(
+                f"DeviceContextCapture wired with target_package="
+                f"{self._target_package}"
+            )
 
         # Set after_sleep_action to 0.0 to disable DroidRun's fixed delay
         # Our explicit wait predicates replace it
@@ -444,8 +465,13 @@ class DroidRunAgentService:
         """Handle a ToolExecutionEvent from DroidRun's event stream.
 
         Drives the step phase machine through transitions based on
-        tool execution events. Captures pre-state before EXECUTE,
-        waits for UI to settle, then verifies post-state in RECORD.
+        tool execution events. Before proceeding to DECIDE, validates:
+        - Context pre-check (D-02): current package matches target app
+        - UI dump validation (D-03): UI data is parseable and non-empty
+
+        When either check fails, the step skips DECIDE/EXECUTE and
+        transitions CAPTURE -> CHECKPOINT with skip reason metadata,
+        preserving run stability per D-04.
         """
         if not self._step_phase_machine:
             return
@@ -461,59 +487,155 @@ class DroidRunAgentService:
             f"success={success}"
         )
 
+        # --- Context pre-check (D-02): compare package against target ---
+        skip_reason = None
+
+        if self._context_capture:
+            try:
+                device_ctx = await self._context_capture.capture()
+                self._current_device_context = device_ctx
+
+                if not device_ctx.is_target_app:
+                    logger.warning(
+                        f"Step {self._current_step_number}: app mismatch detected "
+                        f"(current={device_ctx.package}, target="
+                        f"{self._target_package}). Skipping DECIDE/EXECUTE."
+                    )
+                    skip_reason = StepSkipReason.TARGET_APP_MISMATCH
+            except Exception as e:
+                logger.warning(
+                    f"Step {self._current_step_number}: context capture failed: {e}"
+                )
+
+        # --- UI dump validation (D-03): check parseable and non-empty ---
+        if skip_reason is None and self._ui_dump_validator:
+            try:
+                # Get UI data from DroidRun agent's state, if available
+                ui_data = None
+                if self._droid_agent and hasattr(self._droid_agent, "state_provider"):
+                    state_provider = self._droid_agent.state_provider
+                    if state_provider and hasattr(state_provider, "get_state"):
+                        state = await state_provider.get_state()
+                        if state and isinstance(state, dict):
+                            ui_data = state.get("a11y_tree")
+
+                # If no a11y_tree from state_provider, try shared_state
+                if ui_data is None and self._droid_agent:
+                    shared_state = getattr(self._droid_agent, "shared_state", None)
+                    if shared_state and hasattr(shared_state, "action_history"):
+                        # Last action may have state attached
+                        pass  # Fall through to validate None
+
+                if ui_data is not None:
+                    # Use simple validate (no retry getter available in this context)
+                    validation = self._ui_dump_validator.validate(ui_data)
+
+                    if not validation.is_valid:
+                        logger.warning(
+                            f"Step {self._current_step_number}: UI dump invalid "
+                            f"({validation.error}, elements={validation.element_count}). "
+                            f"Skipping DECIDE/EXECUTE."
+                        )
+                        skip_reason = StepSkipReason.INVALID_UI_DUMP
+                # If ui_data is None, proceed without validation —
+                # DroidRun may not have state_provider in all execution paths
+
+            except Exception as e:
+                logger.warning(
+                    f"Step {self._current_step_number}: UI dump validation error: {e}"
+                )
+
+        # --- Execute phase transitions ---
         try:
-            # CAPTURE -> DECIDE (AI has decided, now executing)
-            self._step_phase_machine.transition_to(StepPhase.DECIDE)
+            if skip_reason is not None:
+                # Skip DECIDE/EXECUTE — go CAPTURE -> CHECKPOINT with skip metadata
+                metadata = json.dumps({
+                    "skip_reason": skip_reason.value,
+                    "package": getattr(self._current_device_context, "package", ""),
+                    "activity": getattr(self._current_device_context, "activity", ""),
+                })
 
-            # DECIDE -> EXECUTE
-            self._step_phase_machine.transition_to(StepPhase.EXECUTE)
+                logger.info(
+                    f"Step {self._current_step_number}: skipping DECIDE/EXECUTE "
+                    f"due to {skip_reason.value}"
+                )
 
-            # Capture pre-state BEFORE waiting (for post-action verification)
-            pre_state = {}
-            if self._action_verifier:
+                # CAPTURE -> CHECKPOINT (skip DECIDE, EXECUTE, RECORD)
+                self._step_phase_machine.transition_to(StepPhase.CHECKPOINT)
+
+                # Record skip metadata on the transition
+                transition = StepPhaseTransition(
+                    id=None,
+                    run_id=self._current_run_id,
+                    step_number=self._current_step_number,
+                    from_phase=StepPhase.CAPTURE.value,
+                    to_phase=StepPhase.CHECKPOINT.value,
+                    timestamp=datetime.now(),
+                    action_type=None,
+                    duration_ms=None,
+                    metadata_json=metadata,
+                )
                 try:
-                    pre_state = await self._action_verifier.capture_pre_state()
-                    logger.debug(
-                        f"Step {self._current_step_number}: captured pre_state "
-                        f"pkg={pre_state.get('package', '?')}"
-                    )
+                    self._step_phase_repository.record_transition(transition)
                 except Exception as e:
-                    logger.warning(
-                        f"Step {self._current_step_number}: pre_state capture failed: {e}"
-                    )
+                    logger.warning(f"Failed to persist skip transition: {e}")
 
-            # Wait for UI to settle after action
-            if self._ui_wait_predicate:
-                settled = await self._ui_wait_predicate.wait_for_ui_settled(tool_name)
-                if not settled:
-                    logger.debug(
-                        f"UI did not settle after {tool_name} "
-                        f"(step {self._current_step_number})"
-                    )
+                # CHECKPOINT -> CAPTURE (ready for next step)
+                self._step_phase_machine.transition_to(StepPhase.CAPTURE)
+            else:
+                # Normal flow: CAPTURE -> DECIDE -> EXECUTE -> RECORD -> CHECKPOINT
+                # CAPTURE -> DECIDE (AI has decided, now executing)
+                self._step_phase_machine.transition_to(StepPhase.DECIDE)
 
-            # EXECUTE -> RECORD
-            self._step_phase_machine.transition_to(StepPhase.RECORD)
+                # DECIDE -> EXECUTE
+                self._step_phase_machine.transition_to(StepPhase.EXECUTE)
 
-            # Verify post-action state in RECORD phase
-            if self._action_verifier and pre_state:
-                try:
-                    verification = await self._action_verifier.verify(
-                        pre_state, tool_name
-                    )
-                    logger.info(
-                        f"Step {self._current_step_number}: verification "
-                        f"result={verification} for action={tool_name}"
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"Step {self._current_step_number}: verification failed: {e}"
-                    )
+                # Capture pre-state BEFORE waiting (for post-action verification)
+                pre_state = {}
+                if self._action_verifier:
+                    try:
+                        pre_state = await self._action_verifier.capture_pre_state()
+                        logger.debug(
+                            f"Step {self._current_step_number}: captured pre_state "
+                            f"pkg={pre_state.get('package', '?')}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Step {self._current_step_number}: pre_state capture failed: {e}"
+                        )
 
-            # RECORD -> CHECKPOINT
-            self._step_phase_machine.transition_to(StepPhase.CHECKPOINT)
+                # Wait for UI to settle after action
+                if self._ui_wait_predicate:
+                    settled = await self._ui_wait_predicate.wait_for_ui_settled(tool_name)
+                    if not settled:
+                        logger.debug(
+                            f"UI did not settle after {tool_name} "
+                            f"(step {self._current_step_number})"
+                        )
 
-            # CHECKPOINT -> CAPTURE (ready for next step)
-            self._step_phase_machine.transition_to(StepPhase.CAPTURE)
+                # EXECUTE -> RECORD
+                self._step_phase_machine.transition_to(StepPhase.RECORD)
+
+                # Verify post-action state in RECORD phase
+                if self._action_verifier and pre_state:
+                    try:
+                        verification = await self._action_verifier.verify(
+                            pre_state, tool_name
+                        )
+                        logger.info(
+                            f"Step {self._current_step_number}: verification "
+                            f"result={verification} for action={tool_name}"
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Step {self._current_step_number}: verification failed: {e}"
+                        )
+
+                # RECORD -> CHECKPOINT
+                self._step_phase_machine.transition_to(StepPhase.CHECKPOINT)
+
+                # CHECKPOINT -> CAPTURE (ready for next step)
+                self._step_phase_machine.transition_to(StepPhase.CAPTURE)
 
         except ValueError as e:
             logger.warning(
@@ -585,6 +707,9 @@ class DroidRunAgentService:
         """
         start_time = time.time()
         goal: Optional[DroidRunGoal] = None
+
+        # Store target package for context pre-check (Plan 02)
+        self._target_package = app_package
 
         # Crash recovery settings
         max_crash_retries = 2
