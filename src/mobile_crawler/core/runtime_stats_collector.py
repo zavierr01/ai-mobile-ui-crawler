@@ -61,10 +61,10 @@ class RuntimeStats:
     stuck_recovery_success: int = 0
     app_crash_count: int = 0
     app_relaunch_count: int = 0
+    context_loss_count: int = 0
     context_recovery_count: int = 0
     invalid_bbox_count: int = 0
     avg_recovery_time_ms: float = 0.0
-    total_recovery_time_ms: float = 0.0  # Helper for average
     total_recovery_time_ms: float = 0.0  # Helper for average
 
     # Device & Session
