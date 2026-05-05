@@ -274,6 +274,8 @@ class DatabaseManager:
                 action_type TEXT,
                 duration_ms REAL,
                 metadata_json TEXT,
+                current_package TEXT DEFAULT NULL,
+                current_activity TEXT DEFAULT NULL,
                 FOREIGN KEY (run_id) REFERENCES runs(id)
             )
         """)
@@ -327,6 +329,14 @@ class DatabaseManager:
             columns = [row["name"] for row in cursor.fetchall()]
             if "current_phase" not in columns:
                 conn.execute("ALTER TABLE step_logs ADD COLUMN current_phase TEXT DEFAULT 'capture'")
+
+            # Migration for step_phase_transitions context columns
+            cursor = conn.execute("PRAGMA table_info(step_phase_transitions)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "current_package" not in columns:
+                conn.execute("ALTER TABLE step_phase_transitions ADD COLUMN current_package TEXT DEFAULT NULL")
+            if "current_activity" not in columns:
+                conn.execute("ALTER TABLE step_phase_transitions ADD COLUMN current_activity TEXT DEFAULT NULL")
 
             conn.commit()
         except sqlite3.OperationalError as e:

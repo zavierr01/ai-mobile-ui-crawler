@@ -18,3 +18,5 @@ class StepPhaseTransition:
     action_type: Optional[str] = None  # which action triggered this
     duration_ms: Optional[float] = None  # time spent in from_phase
     metadata_json: Optional[str] = None  # optional extra context as JSON string
+    current_package: Optional[str] = None  # app package active during this transition
+    current_activity: Optional[str] = None  # activity component active during this transition

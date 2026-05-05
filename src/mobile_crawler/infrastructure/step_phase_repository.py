@@ -41,8 +41,9 @@ class StepPhaseRepository:
                     """
                     INSERT INTO step_phase_transitions
                         (run_id, step_number, from_phase, to_phase,
-                         timestamp, action_type, duration_ms, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                         timestamp, action_type, duration_ms, metadata_json,
+                         current_package, current_activity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         transition.run_id,
@@ -53,6 +54,8 @@ class StepPhaseRepository:
                         transition.action_type,
                         transition.duration_ms,
                         transition.metadata_json,
+                        transition.current_package,
+                        transition.current_activity,
                     ),
                 )
                 conn.commit()
@@ -105,7 +108,8 @@ class StepPhaseRepository:
         cursor.execute(
             """
             SELECT id, run_id, step_number, from_phase, to_phase,
-                   timestamp, action_type, duration_ms, metadata_json
+                   timestamp, action_type, duration_ms, metadata_json,
+                   current_package, current_activity
             FROM step_phase_transitions
             WHERE run_id = ? AND step_number = ?
             ORDER BY timestamp ASC
@@ -128,7 +132,8 @@ class StepPhaseRepository:
         cursor.execute(
             """
             SELECT id, run_id, step_number, from_phase, to_phase,
-                   timestamp, action_type, duration_ms, metadata_json
+                   timestamp, action_type, duration_ms, metadata_json,
+                   current_package, current_activity
             FROM step_phase_transitions
             WHERE run_id = ?
             ORDER BY step_number ASC, timestamp ASC
@@ -299,4 +304,44 @@ class StepPhaseRepository:
             action_type=row[6],
             duration_ms=row[7],
             metadata_json=row[8],
+            current_package=row[9] if len(row) > 9 else None,
+            current_activity=row[10] if len(row) > 10 else None,
         )
+
+    def record_device_context(
+        self, run_id: int, step_number: int, package: str, activity: str
+    ) -> None:
+        """Update the latest transition for a step with device context.
+
+        Args:
+            run_id: The run ID.
+            step_number: The step number.
+            package: The current device package name.
+            activity: The current device activity component.
+
+        Raises:
+            RecorderError: If the database operation fails.
+        """
+        try:
+            with closing(self.db_manager.get_connection()) as conn:
+                conn.execute(
+                    """
+                    UPDATE step_phase_transitions
+                    SET current_package = ?, current_activity = ?
+                    WHERE run_id = ? AND step_number = ?
+                    AND id = (
+                        SELECT id FROM step_phase_transitions
+                        WHERE run_id = ? AND step_number = ?
+                        ORDER BY timestamp DESC
+                        LIMIT 1
+                    )
+                """,
+                    (package, activity, run_id, step_number, run_id, step_number),
+                )
+                conn.commit()
+        except sqlite3.OperationalError as e:
+            raise RecorderError(
+                f"Failed to record device context: {e}",
+                context=ErrorContext(run_id=run_id),
+                cause=e,
+            ) from e
