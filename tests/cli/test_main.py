@@ -30,5 +30,6 @@ class TestCliMain:
         runner = CliRunner()
         result = runner.invoke(cli, [])
 
-        assert result.exit_code == 0
+        # Click returns exit code 2 when no command is given
+        assert result.exit_code == 2
         assert "Mobile Crawler" in result.output
