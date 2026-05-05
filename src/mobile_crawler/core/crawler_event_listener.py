@@ -123,3 +123,22 @@ class CrawlerEventListener(ABC):
     def on_recovery_exhausted(self, run_id: int, step_number: int, attempts: int, message: str) -> None:
         """Called when all recovery attempts are exhausted."""
         pass
+
+    def on_step_phase_transition(
+        self,
+        run_id: int,
+        step_number: int,
+        from_phase: str,
+        to_phase: str,
+        duration_ms: float,
+    ) -> None:
+        """Called when a step phase transition occurs.
+
+        Args:
+            run_id: The run ID
+            step_number: Step number within the run
+            from_phase: Previous phase (e.g., "capture")
+            to_phase: New phase (e.g., "decide")
+            duration_ms: Time spent in from_phase in milliseconds
+        """
+        pass
