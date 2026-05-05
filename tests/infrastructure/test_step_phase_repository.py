@@ -287,3 +287,128 @@ class TestStepPhaseRepository:
         row = cursor.fetchone()
         assert row is not None
         assert row[0] == "execute"
+
+    # --- Observability query tests (Plan 03-02) ---
+
+    def test_get_run_phase_stats_empty_run(self, step_phase_repository, db_manager_with_run):
+        """Test get_run_phase_stats returns zeros/None when run has no transitions."""
+        run_id = db_manager_with_run._test_run_id
+        stats = step_phase_repository.get_run_phase_stats(run_id)
+        assert stats["total_steps"] == 0
+        assert stats["total_transitions"] == 0
+        assert stats["phases_completed"] == 0
+        assert stats["avg_step_duration_ms"] is None
+
+    def test_get_run_phase_stats_with_transitions(self, step_phase_repository, db_manager_with_run):
+        """Test get_run_phase_stats returns correct aggregated stats across multiple steps."""
+        run_id = db_manager_with_run._test_run_id
+        base_time = datetime.now()
+
+        # Step 1: capture->decide->execute->record->checkpoint->capture (full cycle)
+        transitions_step1 = [
+            ("capture", "decide", base_time),
+            ("decide", "execute", base_time + timedelta(milliseconds=100)),
+            ("execute", "record", base_time + timedelta(milliseconds=300)),
+            ("record", "checkpoint", base_time + timedelta(milliseconds=500)),
+            ("checkpoint", "capture", base_time + timedelta(milliseconds=600)),
+        ]
+        for from_p, to_p, ts in transitions_step1:
+            step_phase_repository.record_transition(
+                StepPhaseTransition(
+                    id=None,
+                    run_id=run_id,
+                    step_number=1,
+                    from_phase=from_p,
+                    to_phase=to_p,
+                    timestamp=ts,
+                )
+            )
+
+        # Step 2: capture->decide->execute (partial)
+        transitions_step2 = [
+            ("capture", "decide", base_time + timedelta(seconds=2)),
+            ("decide", "execute", base_time + timedelta(seconds=2, milliseconds=150)),
+        ]
+        for from_p, to_p, ts in transitions_step2:
+            step_phase_repository.record_transition(
+                StepPhaseTransition(
+                    id=None,
+                    run_id=run_id,
+                    step_number=2,
+                    from_phase=from_p,
+                    to_phase=to_p,
+                    timestamp=ts,
+                )
+            )
+
+        stats = step_phase_repository.get_run_phase_stats(run_id)
+        assert stats["total_steps"] == 2
+        assert stats["total_transitions"] == 7
+        assert stats["phases_completed"] == 1  # one checkpoint->capture transition
+        assert stats["avg_step_duration_ms"] is not None
+        assert stats["avg_step_duration_ms"] > 0
+
+    def test_get_phase_durations_for_step(self, step_phase_repository, db_manager_with_run):
+        """Test get_phase_durations_for_step returns dict mapping phase to duration."""
+        run_id = db_manager_with_run._test_run_id
+        base_time = datetime.now()
+
+        step_phase_repository.record_transition(
+            StepPhaseTransition(
+                id=None,
+                run_id=run_id,
+                step_number=1,
+                from_phase="capture",
+                to_phase="decide",
+                timestamp=base_time,
+                duration_ms=120.0,
+            )
+        )
+        step_phase_repository.record_transition(
+            StepPhaseTransition(
+                id=None,
+                run_id=run_id,
+                step_number=1,
+                from_phase="decide",
+                to_phase="execute",
+                timestamp=base_time + timedelta(milliseconds=100),
+                duration_ms=250.0,
+            )
+        )
+
+        durations = step_phase_repository.get_phase_durations_for_step(run_id, 1)
+        assert isinstance(durations, dict)
+        assert durations.get("capture") == 120.0
+        assert durations.get("decide") == 250.0
+
+    def test_get_phase_durations_for_step_empty(self, step_phase_repository, db_manager_with_run):
+        """Test get_phase_durations_for_step returns empty dict when step has no transitions."""
+        run_id = db_manager_with_run._test_run_id
+        durations = step_phase_repository.get_phase_durations_for_step(run_id, 999)
+        assert durations == {}
+
+    def test_get_latest_step_for_run(self, step_phase_repository, db_manager_with_run):
+        """Test get_latest_step_for_run returns the highest step_number with transitions."""
+        run_id = db_manager_with_run._test_run_id
+        base_time = datetime.now()
+
+        for step_num in [1, 3, 5]:
+            step_phase_repository.record_transition(
+                StepPhaseTransition(
+                    id=None,
+                    run_id=run_id,
+                    step_number=step_num,
+                    from_phase="capture",
+                    to_phase="decide",
+                    timestamp=base_time + timedelta(seconds=step_num),
+                )
+            )
+
+        result = step_phase_repository.get_latest_step_for_run(run_id)
+        assert result == 5
+
+    def test_get_latest_step_for_run_empty(self, step_phase_repository, db_manager_with_run):
+        """Test get_latest_step_for_run returns 0 when no transitions exist."""
+        run_id = db_manager_with_run._test_run_id
+        result = step_phase_repository.get_latest_step_for_run(run_id)
+        assert result == 0
