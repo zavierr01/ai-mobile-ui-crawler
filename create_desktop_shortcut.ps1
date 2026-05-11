@@ -1,4 +1,4 @@
-# PowerShell script to create a desktop shortcut for Appium Traverser 
+# PowerShell script to create a desktop shortcut for Mobile Crawler
 # This script automatically creates a shortcut with icon and proper name
 
 # Get the directory where this script is located
@@ -7,15 +7,15 @@ Set-Location $ScriptDir
 
 # Get desktop path
 $DesktopPath = [Environment]::GetFolderPath("Desktop")
-$ShortcutPath = Join-Path $DesktopPath "Appium Traverser.lnk"
+$ShortcutPath = Join-Path $DesktopPath "Mobile Crawler.lnk"
 
 # Paths
-$VbsScriptPath = Join-Path $ScriptDir "run_ui.vbs"
+$StartScriptPath = Join-Path $ScriptDir "scripts\start.ps1"
 $IconPathIco = Join-Path $ScriptDir "crawler_logo.ico"
 
 # Check if files exist
-if (-not (Test-Path $VbsScriptPath)) {
-    Write-Host "Error: run_ui.vbs not found!" -ForegroundColor Red
+if (-not (Test-Path $StartScriptPath)) {
+    Write-Host "Error: scripts\start.ps1 not found!" -ForegroundColor Red
     exit 1
 }
 
@@ -30,10 +30,10 @@ $WshShell = New-Object -ComObject WScript.Shell
 
 # Create shortcut
 $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
-$Shortcut.TargetPath = "wscript.exe"
-$Shortcut.Arguments = "`"$VbsScriptPath`""
+$Shortcut.TargetPath = "powershell.exe"
+$Shortcut.Arguments = "-ExecutionPolicy Bypass -File `"$StartScriptPath`""
 $Shortcut.WorkingDirectory = $ScriptDir
-$Shortcut.Description = "Launch Appium Traverser"
+$Shortcut.Description = "Launch Mobile Crawler"
 
 # Set icon (Windows shortcuts require ICO format and absolute paths)
 $IconSet = $false
@@ -78,7 +78,7 @@ if ($IconSet) {
     Write-Host "Or manually set the icon by right-clicking the shortcut > Properties > Change Icon" -ForegroundColor Cyan
 }
 
-Write-Host "`nYou can now double-click 'Appium Traverser' on your desktop to launch the application." -ForegroundColor Green
+Write-Host "`nYou can now double-click 'Mobile Crawler' on your desktop to launch the application." -ForegroundColor Green
 
 # Clean up COM object
 [System.Runtime.Interopservices.Marshal]::ReleaseComObject($WshShell) | Out-Null

@@ -238,8 +238,20 @@ function Start-MainUI {
     
     Write-Status "Starting main UI application..." -Status START
     
+    # Make the local src tree importable even when the package has not been installed editable.
+    $repoSrc = Join-Path (Get-Location) "src"
+    if ($env:PYTHONPATH) {
+        $env:PYTHONPATH = "$repoSrc;$env:PYTHONPATH"
+    }
+    else {
+        $env:PYTHONPATH = $repoSrc
+    }
+
     # Run in current window (foreground) so user can see output
-    $process = Start-Process -FilePath "python" -ArgumentList "run_ui.py" -PassThru -NoNewWindow
+    $process = Start-Process -FilePath "python" -ArgumentList @(
+        "-m",
+        "mobile_crawler.ui.main_window"
+    ) -PassThru -NoNewWindow
     
     if ($process) {
         $script:StartedProcesses += $process

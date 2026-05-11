@@ -26,13 +26,13 @@ For development tools:
 pip install -e ".[dev]"
 ```
 
-Run the GUI:
+Run the GUI and managed MobSF stack:
 
 ```powershell
-python run_ui.py
-# or, after editable install:
-mobile-crawler-gui
+.\scripts\start.ps1
 ```
+
+Use `.\scripts\start.ps1 -UiOnly` to start only the GUI. After editable install, `mobile-crawler-gui` also starts the GUI only.
 
 Run a crawl from the CLI:
 
@@ -42,7 +42,7 @@ python run_cli.py crawl --device emulator-5554 --package com.example.app --provi
 mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --steps 15
 ```
 
-Optional startup helper:
+Startup helper:
 
 ```powershell
 .\scripts\start.ps1          # start MobSF, then the UI
@@ -68,7 +68,7 @@ Optional integrations:
 
 ### GUI
 
-The GUI entry point is `run_ui.py`, which inserts `src` into `sys.path` and calls `mobile_crawler.ui.main_window.run()`. `MainWindow` builds the PySide6 interface, creates services and repositories, bridges Python logging into the log panel, creates run records, and launches crawl execution on a worker thread.
+The main GUI launcher is `.\scripts\start.ps1`, which starts the managed MobSF container and then runs `mobile_crawler.ui.main_window`. `MainWindow` builds the PySide6 interface, creates services and repositories, bridges Python logging into the log panel, creates run records, and launches crawl execution on a worker thread.
 
 The UI exposes device selection, app selection, AI model/provider selection, crawl controls, settings, logs, run history, statistics, and AI monitoring. Settings are persisted through `UserConfigStore` and copied into a `ConfigManager` when a crawl starts.
 
@@ -98,16 +98,111 @@ mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --prov
 mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --enable-mobsf-analysis
 ```
 
+## MobSF Static Analysis
+
+Mobile Crawler can run MobSF static APK analysis after a successful crawl or manually from the `Run MobSF` button in Run History. MobSF itself must be running separately; the app connects to its REST API, pulls the target APK from the selected device, uploads it, starts a static scan, and saves the JSON/PDF reports in the run session.
+
+The analysis supports regular APKs and split APK installs. Split APKs are pulled from the device, packaged into a `.apks` archive, and uploaded to MobSF.
+
+Artifacts are saved under the run folder:
+
+```text
+output_data/
+└── run_{ID}_{YYYYMMDD_HHMMSS}/
+    ├── apks/
+    │   ├── com.example.app.apk
+    │   └── com.example.app.apks
+    └── reports/
+        ├── {mobsf_hash}_report.json
+        └── {mobsf_hash}_report.pdf
+```
+
+### Install Docker Desktop on Windows
+
+1. Install Docker Desktop for Windows from <https://www.docker.com/products/docker-desktop/>.
+2. During installation, enable the WSL 2 backend when prompted.
+3. Restart Windows if Docker asks you to.
+4. Start Docker Desktop and wait until it shows that Docker Engine is running.
+5. Verify Docker from PowerShell:
+
+```powershell
+docker --version
+docker info
+```
+
+If `docker info` fails, open Docker Desktop once and let it finish initializing. On some Windows systems, you may also need to enable WSL 2 and virtualization in BIOS/UEFI.
+
+### Install and Run MobSF Docker Image
+
+Pull the MobSF image:
+
+```powershell
+docker pull opensecurity/mobile-security-framework-mobsf
+```
+
+Run MobSF manually on `http://localhost:8000`:
+
+```powershell
+docker run --rm -it --name mobile-crawler-mobsf -p 8000:8000 opensecurity/mobile-security-framework-mobsf
+```
+
+Keep this PowerShell window open while using MobSF analysis. To stop MobSF, press `Ctrl+C` in that window.
+
+Or use the project launcher:
+
+```powershell
+.\scripts\start.ps1
+```
+
+The launcher starts MobSF with the expected container name, saves the API key to `.mobsf_api_key` when it can extract it from the container logs, then starts the GUI.
+
+### Configure MobSF API Key
+
+MobSF requires an API key for REST calls. Mobile Crawler resolves the key automatically in this order:
+
+1. `.mobsf_api_key` in the repository root or a parent directory.
+2. Docker logs from the managed `mobile-crawler-mobsf` container.
+3. Legacy `CRAWLER_MOBSF_API_KEY` / `mobsf_api_key` sources for backward compatibility.
+4. Fail with a clear setup error if no key is available.
+
+To create the key file manually, copy the REST API key printed in the MobSF Docker logs and write it to `.mobsf_api_key`:
+
+```powershell
+Set-Content -Path .mobsf_api_key -Value "<your_mobsf_api_key>"
+```
+
+The default MobSF URL is `http://localhost:8000`. Change the MobSF API URL in the GUI settings only if you run MobSF elsewhere.
+
+### Run MobSF Analysis
+
+Automatic after crawl:
+
+```powershell
+mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --enable-mobsf-analysis
+```
+
+In the GUI, enable MobSF analysis in Settings before starting a crawl. MobSF runs only after a successful, non-cancelled crawl. If MobSF fails, the crawl remains completed and the failure is written to logs.
+
+Manual from history:
+
+1. Open the GUI.
+2. Select a completed run in Run History.
+3. Click `Run MobSF`.
+4. Wait for the background analysis to finish.
+
+The manual button uses the run's stored device ID and package name, so the same device or emulator should still be available through ADB.
+
 ## Runtime Architecture
 
 The current crawl flow is:
 
-1. `run_cli.py` or `run_ui.py` starts the CLI or GUI.
+1. `run_cli.py`, `mobile-crawler-cli`, `mobile-crawler-gui`, or `.\scripts\start.ps1` starts the CLI or GUI.
 2. The CLI `crawl` command or GUI `MainWindow` creates a run record, prepares `ConfigManager`, repositories, and `SessionFolderManager`, then runs `CrawlerLoop`.
 3. `CrawlerLoop` creates a timestamped session folder, stores the session path on the run, emits lifecycle events, attaches DroidRun logging, and calls `DroidRunAgentService.execute_exploration_task()`.
 4. `DroidRunAgentService` translates Mobile Crawler settings into a DroidRun `DroidConfig`, ensures the target package is active through ADB preflight checks, creates a DroidRun `DroidAgent`, and runs the DroidRun workflow.
 5. During execution, Mobile Crawler consumes DroidRun tool events for step phase tracking, forwards logs and stdout to UI/CLI listeners, handles duration limits and cancellation, tracks action outcomes from DroidRun shared state, retries app-crash-like failures, and cleans up async LLM clients.
 6. `CrawlerLoop` updates final run stats and emits completion or error events.
+7. If MobSF analysis is enabled and the crawl completed successfully, `CrawlerLoop` runs MobSF static analysis and logs the generated report paths.
 
 `CrawlerLoop` is intentionally thin. It manages Mobile Crawler run state, session folders, event forwarding, cancellation, logging, cleanup, and final stats; it does not own the exploration loop.
 

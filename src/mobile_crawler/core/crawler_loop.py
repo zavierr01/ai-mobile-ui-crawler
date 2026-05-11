@@ -21,6 +21,7 @@ from mobile_crawler.domain.errors import (
     ErrorContext,
 )
 from mobile_crawler.domain.video_recording_manager import VideoRecordingManager
+from mobile_crawler.infrastructure.mobsf_manager import MobSFManager
 from mobile_crawler.infrastructure.run_repository import RunRepository
 from mobile_crawler.infrastructure.session_folder_manager import SessionFolderManager
 
@@ -146,6 +147,7 @@ class CrawlerLoop:
             Exception: If the crawl fails
         """
         start_time = time.time()
+        self._cancel_requested = False
 
         try:
             run = self.run_repository.get_run_by_id(run_id)
@@ -305,6 +307,9 @@ class CrawlerLoop:
                 end_time=datetime.now()
             )
 
+            if status == "COMPLETED" and self.config_manager.get("enable_mobsf_analysis", False) is True:
+                self._run_mobsf_analysis(run, run_id)
+
             # Emit crawl completed with action stats encoded in reason for backward compatibility
             # Format: "reason | successful=X failed=Y total=Z"
             stats_suffix = f" | successful={successful_actions} failed={failed_actions} total={total_actions}"
@@ -338,6 +343,33 @@ class CrawlerLoop:
                 self._droidrun_agent_service.clear_run_logging()
                 self._droidrun_agent_service = None
             self._transition_state("STOPPED", run_id)
+
+    def _run_mobsf_analysis(self, run, run_id: int) -> None:
+        """Run MobSF after a successful crawl without affecting crawl completion."""
+        self._emit_event("on_debug_log", run_id, 0, "Starting MobSF static analysis...")
+        try:
+            mobsf_manager = MobSFManager(
+                config_manager=self.config_manager,
+                session_folder_manager=self.session_folder_manager,
+            )
+            result = mobsf_manager.analyze_run(run, run.device_id)
+            if result.success:
+                details = [f"MobSF analysis completed. Hash: {result.scan_id}"]
+                if result.json_path:
+                    details.append(f"JSON report: {result.json_path}")
+                if result.report_path:
+                    details.append(f"PDF report: {result.report_path}")
+                self._emit_event("on_debug_log", run_id, 0, " | ".join(details))
+            else:
+                self._emit_event(
+                    "on_debug_log",
+                    run_id,
+                    0,
+                    f"MobSF analysis failed: {result.error or 'Unknown error'}",
+                )
+        except Exception as e:
+            logger.warning("MobSF analysis failed for run %s: %s", run_id, e)
+            self._emit_event("on_debug_log", run_id, 0, f"MobSF analysis failed: {e}")
 
     def get_span_stats(self):
         """Return current OTel span stats from the active agent service, or None."""

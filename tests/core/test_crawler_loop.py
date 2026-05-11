@@ -201,6 +201,147 @@ class TestCrawlerLoopLifecycle:
         assert ("IDLE", "RUNNING") in states
         assert any(s[1] == "STOPPED" for s in states)
 
+    @patch('mobile_crawler.core.crawler_loop.MobSFManager')
+    @patch('mobile_crawler.core.crawler_loop.DroidRunAgentService')
+    def test_run_calls_mobsf_after_success_when_enabled(
+        self,
+        mock_droid_service_class,
+        mock_mobsf_class,
+        crawler_loop,
+        mock_config_manager,
+        mock_run_repository,
+        mock_session_folder_manager,
+    ):
+        """MobSF should run after successful non-cancelled crawls when enabled."""
+        mock_config_manager.get.side_effect = lambda key, default=None: {
+            "enable_mobsf_analysis": True,
+            "enable_video_recording": False,
+            "limit_type": "steps",
+            "max_crawl_steps": 1,
+        }.get(key, default)
+        mock_run = Mock()
+        mock_run.app_package = "com.example.app"
+        mock_run.device_id = "device123"
+        mock_run_repository.get_run_by_id.return_value = mock_run
+        mock_session_folder_manager.create_session_folder.return_value = "/tmp/session"
+
+        mock_service = Mock()
+        mock_droid_service_class.return_value = mock_service
+
+        async def mock_explore(*args, **kwargs):
+            mock_result = Mock()
+            mock_result.success = True
+            mock_result.steps_completed = 1
+            mock_result.error_message = None
+            mock_result.final_state = {}
+            return mock_result
+
+        mock_service.execute_exploration_task = mock_explore
+        mock_service.cleanup = Mock()
+        mock_mobsf = Mock()
+        mock_mobsf.analyze_run.return_value = Mock(
+            success=True,
+            scan_id="hash123",
+            json_path="/tmp/session/reports/hash123_report.json",
+            report_path="/tmp/session/reports/hash123_report.pdf",
+        )
+        mock_mobsf_class.return_value = mock_mobsf
+
+        crawler_loop.run(1)
+
+        mock_mobsf.analyze_run.assert_called_once_with(mock_run, "device123")
+
+    @patch('mobile_crawler.core.crawler_loop.MobSFManager')
+    @patch('mobile_crawler.core.crawler_loop.DroidRunAgentService')
+    def test_run_skips_mobsf_when_disabled(
+        self,
+        mock_droid_service_class,
+        mock_mobsf_class,
+        crawler_loop,
+        mock_config_manager,
+        mock_run_repository,
+        mock_session_folder_manager,
+    ):
+        """MobSF should not run when disabled."""
+        mock_config_manager.get.side_effect = lambda key, default=None: {
+            "enable_mobsf_analysis": False,
+            "enable_video_recording": False,
+            "limit_type": "steps",
+        }.get(key, default)
+        mock_run = Mock()
+        mock_run.app_package = "com.example.app"
+        mock_run.device_id = "device123"
+        mock_run_repository.get_run_by_id.return_value = mock_run
+        mock_session_folder_manager.create_session_folder.return_value = "/tmp/session"
+
+        mock_service = Mock()
+        mock_droid_service_class.return_value = mock_service
+
+        async def mock_explore(*args, **kwargs):
+            mock_result = Mock()
+            mock_result.success = True
+            mock_result.steps_completed = 1
+            mock_result.error_message = None
+            mock_result.final_state = {}
+            return mock_result
+
+        mock_service.execute_exploration_task = mock_explore
+        mock_service.cleanup = Mock()
+
+        crawler_loop.run(1)
+
+        mock_mobsf_class.assert_not_called()
+
+    @patch('mobile_crawler.core.crawler_loop.MobSFManager')
+    @patch('mobile_crawler.core.crawler_loop.DroidRunAgentService')
+    def test_run_logs_mobsf_failure_without_erroring_crawl(
+        self,
+        mock_droid_service_class,
+        mock_mobsf_class,
+        crawler_loop,
+        mock_config_manager,
+        mock_run_repository,
+        mock_session_folder_manager,
+        mock_listener,
+    ):
+        """MobSF failures should be logged without changing completed crawl status."""
+        mock_config_manager.get.side_effect = lambda key, default=None: {
+            "enable_mobsf_analysis": True,
+            "enable_video_recording": False,
+            "limit_type": "steps",
+        }.get(key, default)
+        mock_run = Mock()
+        mock_run.app_package = "com.example.app"
+        mock_run.device_id = "device123"
+        mock_run_repository.get_run_by_id.return_value = mock_run
+        mock_session_folder_manager.create_session_folder.return_value = "/tmp/session"
+
+        mock_service = Mock()
+        mock_droid_service_class.return_value = mock_service
+
+        async def mock_explore(*args, **kwargs):
+            mock_result = Mock()
+            mock_result.success = True
+            mock_result.steps_completed = 1
+            mock_result.error_message = None
+            mock_result.final_state = {}
+            return mock_result
+
+        mock_service.execute_exploration_task = mock_explore
+        mock_service.cleanup = Mock()
+        mock_mobsf_class.return_value.analyze_run.return_value = Mock(
+            success=False,
+            error="MobSF unavailable",
+        )
+
+        crawler_loop.run(1)
+
+        assert mock_run_repository.update_run_stats.call_args.kwargs["status"] == "COMPLETED"
+        assert any(
+            "MobSF analysis failed: MobSF unavailable" in call.args[2]
+            for call in mock_listener.on_debug_log.call_args_list
+        )
+
     @patch('mobile_crawler.core.crawler_loop.DroidRunAgentService')
     def test_run_handles_exception_and_emits_on_error(self, mock_droid_service_class, crawler_loop, mock_run_repository, mock_session_folder_manager, mock_listener):
         """Test that run() handles exceptions and emits on_error."""

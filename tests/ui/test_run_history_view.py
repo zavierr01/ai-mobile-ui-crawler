@@ -343,6 +343,62 @@ class TestGenerateReport:
 class TestMobSF:
     """Tests for MobSF functionality."""
 
+    def test_mobsf_button_starts_background_worker(self, qt_app, mock_run_repository, mock_report_generator, monkeypatch):
+        """Real MobSF manager API should be executed through a worker thread."""
+        from mobile_crawler.ui.widgets import run_history_view as run_history_module
+
+        class FakeSignal:
+            def __init__(self):
+                self.callbacks = []
+
+            def connect(self, callback):
+                self.callbacks.append(callback)
+
+        class FakeWorker:
+            instances = []
+
+            def __init__(self, run, manager):
+                self.run = run
+                self.manager = manager
+                self.analysis_finished = FakeSignal()
+                self.analysis_failed = FakeSignal()
+                self.finished = FakeSignal()
+                self.started = False
+                FakeWorker.instances.append(self)
+
+            def start(self):
+                self.started = True
+
+            def deleteLater(self):
+                pass
+
+        manager = Mock()
+        manager.analyze_run.return_value = Mock(success=True)
+        mock_run_repository.add_run("emulator-5554", "com.example.app", "STOPPED")
+        view = _create_run_history_view(mock_run_repository, mock_report_generator, manager)
+        monkeypatch.setattr(QMessageBox, 'question', lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
+        monkeypatch.setattr(run_history_module, "MobSFAnalysisWorker", FakeWorker)
+
+        view.table.selectRow(0)
+        view._on_mobsf_clicked()
+
+        assert FakeWorker.instances[0].started is True
+        assert view.mobsf_button.text() == "Running MobSF..."
+        assert not view.mobsf_button.isEnabled()
+
+    def test_mobsf_finished_shows_failure_message(self, qt_app, mock_run_repository, mock_report_generator, monkeypatch):
+        """Failure dialogs should include the manager error."""
+        manager = Mock()
+        run = mock_run_repository.add_run("emulator-5554", "com.example.app", "STOPPED")
+        view = _create_run_history_view(mock_run_repository, mock_report_generator, manager)
+        messages = []
+        monkeypatch.setattr(QMessageBox, 'critical', lambda *args, **kwargs: messages.append(args[2]))
+
+        view.table.selectRow(0)
+        view._on_mobsf_finished(run.id, Mock(success=False, error="Upload failed"))
+
+        assert messages == ["Upload failed"]
+
     def test_mobsf_button_emits_signal(self, qt_app, mock_run_repository, mock_report_generator, mock_mobsf_manager, monkeypatch):
         """Test that MobSF button emits mobsf_completed signal."""
         run = mock_run_repository.add_run("emulator-5554", "com.example.app", "STOPPED")

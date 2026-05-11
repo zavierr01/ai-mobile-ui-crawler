@@ -16,13 +16,32 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QColor
 
 if TYPE_CHECKING:
     from mobile_crawler.infrastructure.run_repository import RunRepository
     from mobile_crawler.domain.report_generator import ReportGenerator
     from mobile_crawler.infrastructure.mobsf_manager import MobSFManager
+
+
+class MobSFAnalysisWorker(QThread):
+    """Background worker for MobSF analysis."""
+
+    analysis_finished = Signal(int, object)
+    analysis_failed = Signal(int, str)
+
+    def __init__(self, run, mobsf_manager: "MobSFManager"):
+        super().__init__()
+        self._run = run
+        self._mobsf_manager = mobsf_manager
+
+    def run(self):
+        try:
+            result = self._mobsf_manager.analyze_run(self._run, self._run.device_id)
+            self.analysis_finished.emit(self._run.id, result)
+        except Exception as e:
+            self.analysis_failed.emit(self._run.id, str(e))
 
 
 class RunHistoryView(QWidget):
@@ -56,6 +75,7 @@ class RunHistoryView(QWidget):
         self._run_repository = run_repository
         self._report_generator = report_generator
         self._mobsf_manager = mobsf_manager
+        self._mobsf_worker = None
         
         # US6: Ensure the run history table has enough vertical space by default
         self.setMinimumHeight(280)
@@ -362,24 +382,81 @@ class RunHistoryView(QWidget):
         
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                run = self._run_repository.get_run_by_id(run_id)
+                run = self._get_run_by_id(run_id)
                 if not run:
                     raise ValueError(f"Run {run_id} not found")
-                
-                self._mobsf_manager.analyze_run(run, run.device_id)
-                self.mobsf_completed.emit(run_id)
-                QMessageBox.information(
-                    self,
-                    "MobSF Analysis Complete",
-                    f"MobSF analysis completed for {package}.\n"
-                    f"Results saved to session folder."
-                )
+
+                if not hasattr(self._mobsf_manager, "analyze_run"):
+                    self._mobsf_manager.analyze(package)
+                    self.mobsf_completed.emit(run_id)
+                    QMessageBox.information(
+                        self,
+                        "MobSF Analysis Complete",
+                        f"MobSF analysis completed for {package}.\n"
+                        f"Results saved to session folder."
+                    )
+                    return
+
+                self.mobsf_button.setEnabled(False)
+                self.mobsf_button.setText("Running MobSF...")
+                worker = MobSFAnalysisWorker(run, self._mobsf_manager)
+                worker.analysis_finished.connect(self._on_mobsf_finished)
+                worker.analysis_failed.connect(self._on_mobsf_failed)
+                worker.finished.connect(worker.deleteLater)
+                worker.finished.connect(lambda: setattr(self, "_mobsf_worker", None))
+                self._mobsf_worker = worker
+                worker.start()
             except Exception as e:
                 QMessageBox.critical(
                     self,
                     "Error",
                     f"Failed to run MobSF analysis: {e}"
                 )
+
+    def _get_run_by_id(self, run_id: int):
+        """Fetch a run from repositories with or without get_run_by_id."""
+        if hasattr(self._run_repository, "get_run_by_id"):
+            return self._run_repository.get_run_by_id(run_id)
+        return next((run for run in self._run_repository.get_all_runs() if run.id == run_id), None)
+
+    def _on_mobsf_finished(self, run_id: int, result):
+        """Handle MobSF worker completion."""
+        self.mobsf_button.setText("Run MobSF")
+        self.mobsf_button.setEnabled(self.get_selected_run_id() is not None)
+        self.refresh()
+
+        if result.success:
+            self.mobsf_completed.emit(run_id)
+            details = []
+            if result.scan_id:
+                details.append(f"Hash: {result.scan_id}")
+            if result.json_path:
+                details.append(f"JSON: {result.json_path}")
+            if result.report_path:
+                details.append(f"PDF: {result.report_path}")
+            suffix = "\n" + "\n".join(details) if details else ""
+            QMessageBox.information(
+                self,
+                "MobSF Analysis Complete",
+                f"MobSF analysis completed for run {run_id}.{suffix}"
+            )
+        else:
+            QMessageBox.critical(
+                self,
+                "MobSF Analysis Failed",
+                result.error or "MobSF analysis failed with no error message."
+            )
+
+    def _on_mobsf_failed(self, run_id: int, error: str):
+        """Handle unexpected MobSF worker exceptions."""
+        self.mobsf_button.setText("Run MobSF")
+        self.mobsf_button.setEnabled(self.get_selected_run_id() is not None)
+        self.refresh()
+        QMessageBox.critical(
+            self,
+            "MobSF Analysis Failed",
+            error or f"MobSF analysis failed for run {run_id}."
+        )
 
     def refresh(self):
         """Refresh the run history table."""

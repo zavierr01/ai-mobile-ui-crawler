@@ -1,7 +1,7 @@
 @echo off
 REM Batch file to create desktop shortcut - just double-click this file!
 
-echo Creating desktop shortcut for Appium Traverser ...
+echo Creating desktop shortcut for Mobile Crawler ...
 echo.
 
 REM Run the PowerShell script
