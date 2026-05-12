@@ -1019,6 +1019,9 @@ class DroidRunAgentService:
                     success = result.get("success", False)
                     steps_completed = result.get("steps_completed", 0)
                     error_message = result.get("error_message")
+                elif isinstance(result, list):
+                    success = True
+                    steps_completed = len(result)
 
                 # Extract action history from DroidRun agent's internal state
                 actions_taken = []
@@ -1052,16 +1055,12 @@ class DroidRunAgentService:
                 )
 
                 # Log successful interaction (simulate result for timeout)
-                log_result = (
-                    result
-                    if not is_timeout
-                    else {
-                        "success": success,
-                        "steps_completed": steps_completed,
-                        "actions_taken": actions_taken,
-                        "final_state": droid_result.final_state,
-                    }
-                )
+                log_result = {
+                    "success": success,
+                    "steps_completed": steps_completed,
+                    "actions_taken": actions_taken,
+                    "final_state": droid_result.final_state,
+                }
                 self._log_agent_interaction(run_id, goal, log_result, None)
 
                 if is_timeout:
@@ -1174,7 +1173,7 @@ class DroidRunAgentService:
         )
 
     def _log_agent_interaction(
-        self, run_id: int, goal: Optional[DroidRunGoal], result: Optional[Dict[str, Any]], error_message: Optional[str]
+        self, run_id: int, goal: Optional[DroidRunGoal], result: Optional[Any], error_message: Optional[str]
     ) -> None:
         """Log agent interaction to the database.
 
@@ -1201,6 +1200,7 @@ class DroidRunAgentService:
             # Create response data
             response_data = None
             if result:
+                result = self._normalize_agent_result_for_logging(result)
                 response_data = {
                     "success": result.get("success", False),
                     "steps_completed": result.get("steps_completed", 0),
@@ -1230,6 +1230,41 @@ class DroidRunAgentService:
 
         except Exception as e:
             logger.warning(f"Failed to log agent interaction: {e}")
+
+    @staticmethod
+    def _normalize_agent_result_for_logging(result: Any) -> Dict[str, Any]:
+        """Return a dict-shaped result for database logging."""
+        if isinstance(result, dict):
+            return result
+
+        if isinstance(result, list):
+            return {
+                "success": True,
+                "steps_completed": len(result),
+                "actions_taken": result,
+                "final_state": {"raw_result_type": "list"},
+            }
+
+        if hasattr(result, "success"):
+            return {
+                "success": bool(getattr(result, "success", False)),
+                "steps_completed": int(getattr(result, "steps", 0) or 0),
+                "actions_taken": [],
+                "final_state": {
+                    "completion_reason": getattr(result, "reason", None),
+                    "raw_result_type": type(result).__name__,
+                },
+            }
+
+        return {
+            "success": False,
+            "steps_completed": 0,
+            "actions_taken": [],
+            "final_state": {
+                "raw_result": str(result),
+                "raw_result_type": type(result).__name__,
+            },
+        }
 
     def _ensure_droidrun_import(self) -> None:
         """Ensure the DroidRun submodule is importable without pip install."""

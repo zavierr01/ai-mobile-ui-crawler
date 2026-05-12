@@ -436,6 +436,20 @@ class TestDroidRunAgentServiceErrorHandling:
         assert call_args.run_id == 1
         assert call_args.success is True
 
+    def test_log_agent_interaction_accepts_list_result(self, droidrun_service, mock_ai_repo):
+        """Test _log_agent_interaction handles workflow results that are lists."""
+        goal = DroidRunGoal(description="test goal", max_steps=5)
+        result = [{"action": "tap"}, {"action": "back"}]
+
+        droidrun_service._log_agent_interaction(1, goal, result, None)
+
+        mock_ai_repo.create_ai_interaction.assert_called_once()
+        call_args = mock_ai_repo.create_ai_interaction.call_args[0][0]
+        response_data = json.loads(call_args.response_raw)
+        assert response_data["success"] is True
+        assert response_data["steps_completed"] == 2
+        assert response_data["actions_taken"] == result
+
 
 class TestDroidRunAgentServiceConfig:
     """Tests for DroidRun configuration."""
@@ -571,6 +585,32 @@ class TestDroidRunAgentServiceTargetPreflight:
 
         assert result.success is True
         mock_adb.am_start_recovery.assert_called_once_with("com.example.app")
+
+    @pytest.mark.asyncio
+    async def test_execute_accepts_list_workflow_result(self, droidrun_service):
+        mock_adb = Mock()
+        mock_adb.get_current_package.return_value = "com.example.app"
+
+        fake_modules = self._fake_droidrun_modules(success=True)
+        agent_instance = fake_modules["droidrun.agent.droid.droid_agent"].DroidAgent.return_value
+
+        async def _run_list_result():
+            return [{"action": "tap"}]
+
+        agent_instance.run.side_effect = _run_list_result
+
+        with patch("mobile_crawler.domain.adb_action_executor.ADBActionExecutor", return_value=mock_adb), \
+             patch.object(droidrun_service, "_initialize_agent", new=AsyncMock()), \
+             patch.dict(sys.modules, fake_modules):
+            droidrun_service._droidrun_config = Mock()
+            result = await droidrun_service.execute_exploration_task(
+                run_id=1,
+                app_package="com.example.app",
+                max_steps=3,
+            )
+
+        assert result.success is True
+        assert result.steps_completed == 1
 
     @pytest.mark.asyncio
     async def test_execute_preflight_failure_returns_without_creating_droid_agent(self, droidrun_service):
