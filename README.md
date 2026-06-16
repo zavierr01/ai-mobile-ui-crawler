@@ -1,394 +1,291 @@
 # Mobile Crawler
 
-Mobile Crawler is a developer tool for running AI-assisted exploration of Android apps. The application owns the UI, CLI, run/session persistence, settings, logs, and reporting infrastructure; the active exploration runtime is delegated to the DroidRun submodule in `external/droidrun`.
+AI-powered Android app exploration tool. Automatically crawls the UI of an Android app, maps navigation paths, captures screenshots, and records a path graph of every screen and transition discovered.
 
-Mobile Crawler runs through the editable DroidRun runtime in `external/droidrun`.
+---
+
+## Crawl Modes
+
+### OmniParser Sweep (recommended)
+Deterministic, LLM-free traversal driven by a local [OmniParser](https://github.com/microsoft/OmniParser) vision server. Each screen is parsed once for bounding boxes, then every element is tapped in order (top-to-bottom, left-to-right). After each tap, the crawler checks whether a new screen was reached, records the navigation edge, and returns to the base screen before continuing to the next element.
+
+- No per-step LLM cost — fast and repeatable.
+- Attempts carousel detection (a single bounding box that navigates to multiple destinations via sub-region probing).
+- Attempts popup/dropdown handling (re-parses after in-place changes, taps newly appeared elements).
+- Builds a path graph (node = screen, edge = element tap) viewable in the GUI.
+- Requires a running local OmniParser server (see [Setup](#omniparser-setup)).
+
+#### Known Limitations
+
+**Screen identity for single-activity apps (React Native)**
+Screen deduplication uses `package/activity` as the identifier. For apps that host many screens inside one Activity (e.g. React Native's `ReactActivity`), this causes all those screens to be treated as one node — unless a stable UI title can be read from the accessibility hierarchy. Title lookup is unreliable when the first visible text is dynamic content (search suggestions, personalised feeds, counters). This is a fundamental limitation of Android's accessibility APIs for React Native apps and has no fully reliable fix without app instrumentation.
+
+**Carousels**
+Carousel detection is behavioural: after the center of a bounding box navigates somewhere, the crawler probes a 3×3 grid of sub-points within the box. If multiple distinct destinations are found, the element is marked as a carousel. This misses carousels whose items don't individually navigate (e.g. a swipeable image banner), and may misclassify large container boxes that happen to enclose two separate tappable elements.
+
+**Popups and dropdowns**
+When a tap causes an in-place change (pixel diff detected but activity unchanged), the crawler re-runs OmniParser to find newly appeared elements and taps them. This works for simple single-level popups. It does not reliably handle: nested modals more than 2 levels deep, bottom sheets that animate in slowly (may be missed if the settle delay is too short), or dropdowns that require a scroll to reveal all options.
+
+**Animated elements**
+A second "idle" screenshot is taken 0.5 s after each tap to measure background animation noise. Pixels still changing during the idle period are masked out of the tap diff. This reduces false positives from spinners and looping banners but does not eliminate them — fast animations that complete within the settle delay will still inflate the diff ratio and may be misclassified as in-place changes.
+
+**No scroll support**
+Elements below the fold are not discovered. The crawler only taps what OmniParser detects in the initial viewport screenshot. Scrollable lists, infinite feeds, and collapsed sections require manual scroll steps or a separate scroll-and-rescan pass (not yet implemented).
+
+### DroidRun AI Agent
+Delegates exploration to a DroidRun AI agent loaded from `external/droidrun`. An LLM decides each action. More exploratory but slower and non-deterministic.
+
+---
 
 ## Quick Start
 
-```powershell
+```bash
 git clone <repository-url>
 cd mobile-crawler
 
 git submodule update --init --recursive
 
-# The DroidRun submodule is pinned from the project fork:
-# https://github.com/ganainy/droidrun
-git config --file .gitmodules --get submodule.external/droidrun.url
-
-python -m venv venv312
-.\venv312\Scripts\Activate.ps1
+python -m venv .venv
+source .venv/bin/activate          # macOS/Linux
+# .venv\Scripts\Activate.ps1       # Windows
 
 pip install -e .
-# Install DroidRun dependencies from the local submodule, not the published package.
-pip install -e external/droidrun
+pip install -e external/droidrun   # DroidRun submodule
+pip install -e ".[dev]"            # dev tools (pytest, ruff, black)
 ```
 
-For development tools:
+Start the GUI:
 
-```powershell
-pip install -e ".[dev]"
+```bash
+python -m mobile_crawler.ui.main_window
 ```
 
-Run the GUI and managed MobSF stack:
+Or use the PowerShell launcher (Windows, starts MobSF container too):
 
 ```powershell
 .\scripts\start.ps1
 ```
 
-Use `.\scripts\start.ps1 -UiOnly` to start only the GUI. After editable install, `mobile-crawler-gui` also starts the GUI only.
+Run from the CLI:
 
-Run a crawl from the CLI:
-
-```powershell
-python run_cli.py crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --steps 15
-# or, after editable install:
-mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --steps 15
+```bash
+python run_cli.py crawl \
+  --device emulator-5554 \
+  --package com.example.app \
+  --provider gemini \
+  --model gemini-1.5-flash \
+  --steps 15
 ```
 
-Startup helper:
-
-```powershell
-.\scripts\start.ps1          # start MobSF, then the UI
-.\scripts\start.ps1 -NoMobsf # start only the UI
-.\scripts\start.ps1 -UiOnly  # start only the UI
-```
+---
 
 ## Requirements
 
-- Python 3.12 (the project and the vendored DroidRun submodule both target Python 3.12).
-- Android device or emulator reachable through ADB.
-- AI provider credentials for the selected provider. Current config mapping supports Gemini, OpenAI, Anthropic, Ollama, and OpenRouter in `DroidRunAgentService`.
-- `external/droidrun` initialized as a git submodule from `https://github.com/ganainy/droidrun`.
+- Python 3.12
+- Android device or emulator reachable via ADB
+- For **OmniParser Sweep**: local OmniParser server running at `http://localhost:8000`
+- For **DroidRun AI Agent**: AI provider credentials (Gemini, Anthropic, OpenRouter, or Ollama)
+- `external/droidrun` git submodule initialized
 
-Optional integrations:
+Optional:
+- Docker Desktop + MobSF for static APK analysis
+- PCAPdroid for network traffic capture
+- Android screen recording support
 
-- PCAPdroid for traffic capture.
-- MobSF server for static APK analysis.
-- Android screen recording support for session video capture.
-- Replicate or local OmniParser configuration when using fallback-capable parser modes such as `boost`.
+---
 
-## Prepare an Android Device for ADB
+## Connect an Android Device
 
-Mobile Crawler needs the target device or emulator to be visible through ADB before you start the GUI or CLI crawl.
+Install Android SDK Platform Tools so `adb` is on your PATH, then:
 
-Install Android SDK Platform Tools first if `adb` is not already available in PowerShell:
+**USB:**
+1. On the device: Settings → About phone → tap Build number 7× to unlock Developer Options.
+2. Settings → Developer Options → enable USB Debugging.
+3. Connect via USB, accept the authorization prompt on the device.
 
-```powershell
-adb version
+```bash
+adb devices   # should show <device-id> device
 ```
 
-On the Android device:
+**Wireless (Android 11+):**
+1. Settings → Developer Options → Wireless Debugging → pair device.
+2. Use the IP and port shown on the device.
 
-1. Open Settings > About phone.
-2. Tap Build number seven times to enable Developer options.
-3. Open Settings > System > Developer options. The exact path varies by Android version and device vendor.
-4. Enable Developer options.
-5. Enable USB debugging for a USB connection.
-6. Enable Wireless debugging if you want to connect over Wi-Fi.
-
-For USB debugging:
-
-```powershell
+```bash
+adb pair 192.168.1.x:<pairing-port>
+adb connect 192.168.1.x:5555
 adb devices
 ```
 
-Accept the authorization prompt on the device. The device should appear as `device`, not `unauthorized`.
+---
 
-For wireless debugging on Android 11 or newer, keep the device and PC on the same network, open Wireless debugging on the device, and use the IP address and port shown there:
+## OmniParser Setup
 
-```powershell
-adb pair 172.20.10.4:<pairing-port>
-adb connect 172.20.10.4:5555
-adb devices
+OmniParser Sweep requires a local OmniParser server. The default URL is `http://localhost:8000` (configurable in Settings → General → OmniParser Local URL).
+
+Clone and run OmniParser locally following the [OmniParser README](https://github.com/microsoft/OmniParser). Once running, verify:
+
+```bash
+curl http://localhost:8000/health
 ```
 
-Use the connected device ID in crawl commands. For example:
+The GUI Settings → General tab shows the connection status and lets you adjust the detection threshold (`omniparser_box_threshold`, default `0.02`).
 
-```powershell
-mobile-crawler-cli crawl --device 172.20.10.4:5555 --package com.example.app --provider gemini --model gemini-1.5-flash --steps 15
-```
+---
 
-For older Android versions or USB-first wireless setup, connect over USB once, then run:
+## GUI Overview
 
-```powershell
-adb tcpip 5555
-adb shell ip addr show wlan0
-adb connect 172.20.10.4:5555
-adb devices
-```
+| Tab / Panel | What it does |
+|---|---|
+| **General Settings** | Crawl mode selector, OmniParser or DroidRun settings, device/package selection |
+| **AI Settings** | API keys for Gemini, Anthropic, OpenRouter; Replicate key |
+| **Run Controls** | Start/Stop crawl, live log output |
+| **Run History** | Past runs, per-run stats, MobSF analysis trigger |
+| **Path Graph** | Interactive node-edge graph of discovered screens and navigation edges. Nodes show screen thumbnails with element bounding boxes overlaid. Edges show the element thumbnail that was tapped. Carousel elements are highlighted in pink; regular elements in blue. Use the Reset Zoom button to fit the view. |
 
-Replace `172.20.10.4` with the device IP address reported by Android or `adb shell ip addr show wlan0`.
+---
 
-## Usage
+## Path Graph
 
-### GUI
+The path graph is built automatically during an OmniParser Sweep crawl.
 
-The main GUI launcher is `.\scripts\start.ps1`, which starts the managed MobSF container and then runs `mobile_crawler.ui.main_window`. `MainWindow` builds the PySide6 interface, creates services and repositories, bridges Python logging into the log panel, creates run records, and launches crawl execution on a worker thread.
+- **Nodes** — each unique screen discovered (identified by `package/activity/header-hash`).
+- **Edges** — each element tap that caused navigation. Multiple edges between the same two nodes are fanned out in parallel so they are all visible.
+- **Thumbnails on edges** — cropped screenshot of the element that was tapped (shown at the midpoint of the arrow).
+- **Bounding box overlay on nodes** — blue boxes for regular elements, pink for carousels.
 
-The UI exposes device selection, app selection, AI model/provider selection, crawl controls, settings, logs, run history, statistics, and AI monitoring. Settings are persisted through `UserConfigStore` and copied into a `ConfigManager` when a crawl starts.
+Screen deduplication uses a perceptual hash of the **header/title bar region** (10%–35% of screen height) with a Hamming distance threshold of 6. This region is stable within the same screen but unique across different screens, even within the same Android Activity.
 
-### CLI
+---
 
-The CLI entry point is `run_cli.py`, which calls `mobile_crawler.cli.main.run()`. The `crawl` command:
+## OmniParser Sweep — How It Works
 
-1. Creates the app data directory and configuration store.
-2. Applies command-line settings such as device, package, model, provider, step or duration limits, and optional feature flags.
-3. Migrates the SQLite schema and creates a run record.
-4. Creates a `CrawlerLoop` with a JSON event listener.
-5. Runs the crawler and emits lifecycle/debug events as JSON on stdout.
+1. Launch the target app and take a screenshot.
+2. Send the screenshot to the local OmniParser server. Detected bounding boxes are filtered to exclude the status bar (top ~10% of the screen).
+3. Sort elements top-to-bottom, left-to-right.
+4. For each element:
+   - Tap the element center.
+   - Wait for the screen to settle.
+   - Compare the screen signature before and after. If it changed → record a navigation edge.
+   - **Sub-region probing**: tap a 3×3 grid within the element's bounding box. If multiple distinct destinations are found → mark the element as a **carousel** (pink bounding box).
+   - Navigate back to the base screen (up to 5 back presses, relaunch if needed).
+5. Add newly discovered screens to the breadth-first queue and repeat.
 
-Useful flags:
+All edges are stored in the `omni_sweep_edges` table with `(run_id, from_signature, to_signature, from_bbox_json)` uniqueness so duplicate edges from repeated runs are ignored.
 
-```powershell
-mobile-crawler-cli crawl `
-  --device emulator-5554 `
-  --package com.example.app `
-  --provider gemini `
-  --model gemini-1.5-flash `
-  --steps 15
+---
 
-mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider openrouter --model <model> --duration 300
-mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --enable-traffic-capture
-mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --enable-video-recording
-mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --enable-mobsf-analysis
-```
+## DroidRun AI Agent Mode
+
+Delegates the full exploration loop to DroidRun loaded from `external/droidrun`. Configure your AI provider in Settings → AI. Available providers: Gemini, Anthropic, OpenRouter, Ollama.
+
+The `ui_parser_mode` setting controls how DroidRun reads the screen:
+
+| Value | Behavior |
+|---|---|
+| `boost` (default) | Accessibility tree first, OmniParser fallback |
+| `omniparser` | Always use OmniParser vision |
+| `accessibility` | Accessibility tree only |
+
+---
 
 ## MobSF Static Analysis
 
-Mobile Crawler can run MobSF static APK analysis after a successful crawl or manually from the `Run MobSF` button in Run History. MobSF itself must be running separately; the app connects to its REST API, pulls the target APK from the selected device, uploads it, starts a static scan, and saves the JSON/PDF reports in the run session.
+Run MobSF APK analysis after a crawl. Requires MobSF running separately (default `http://localhost:8000`).
 
-The analysis supports regular APKs and split APK installs. Split APKs are pulled from the device, packaged into a `.apks` archive, and uploaded to MobSF.
+**Start MobSF with Docker:**
 
-Artifacts are saved under the run folder:
-
-```text
-output_data/
-└── run_{ID}_{YYYYMMDD_HHMMSS}/
-    ├── apks/
-    │   ├── com.example.app.apk
-    │   └── com.example.app.apks
-    └── reports/
-        ├── {mobsf_hash}_report.json
-        └── {mobsf_hash}_report.pdf
-```
-
-## PCAPdroid Traffic Capture and TLS Decryption
-
-Mobile Crawler can start PCAPdroid before DroidRun begins crawling, request TLS decryption, stop capture during crawl cleanup, and save the resulting `.pcap` file in the run session.
-
-Phone setup:
-
-1. Install PCAPdroid from Google Play on the Android device.
-2. Open PCAPdroid settings and enable TLS decryption.
-3. When prompted by PCAPdroid, install PCAPdroid-mitm.
-4. Install the generated or custom PCAPdroid CA certificate on the device.
-5. In PCAPdroid, tap the settings icon, scroll to the bottom, tap Control Permissions, and generate an API key.
-6. Paste the API key into the Mobile Crawler app UI under Settings > Integrations.
-7. Enable Traffic Capture in Mobile Crawler before starting a crawl.
-
-CLI users can pass `--enable-traffic-capture`. The PCAPdroid API key can come from persisted config or `CRAWLER_PCAPDROID_API_KEY`; without it, PCAPdroid may require on-device consent.
-
-Capture results are saved under:
-
-```text
-output_data/run_{ID}_{YYYYMMDD_HHMMSS}/pcap/
-```
-
-TLS decryption is best effort. QUIC, certificate pinning, apps that do not trust user CAs, and apps with custom encryption may still produce traffic that does not decrypt cleanly.
-
-### Install Docker Desktop on Windows
-
-1. Install Docker Desktop for Windows from <https://www.docker.com/products/docker-desktop/>.
-2. During installation, enable the WSL 2 backend when prompted.
-3. Restart Windows if Docker asks you to.
-4. Start Docker Desktop and wait until it shows that Docker Engine is running.
-5. Verify Docker from PowerShell:
-
-```powershell
-docker --version
-docker info
-```
-
-If `docker info` fails, open Docker Desktop once and let it finish initializing. On some Windows systems, you may also need to enable WSL 2 and virtualization in BIOS/UEFI.
-
-### Install and Run MobSF Docker Image
-
-Pull the MobSF image:
-
-```powershell
+```bash
 docker pull opensecurity/mobile-security-framework-mobsf
-```
-
-Run MobSF manually on `http://localhost:8000`:
-
-```powershell
 docker run --rm -it --name mobile-crawler-mobsf -p 8000:8000 opensecurity/mobile-security-framework-mobsf
 ```
 
-Keep this PowerShell window open while using MobSF analysis. To stop MobSF, press `Ctrl+C` in that window.
+Or use the project launcher on Windows: `.\scripts\start.ps1`
 
-Or use the project launcher:
+**Configure API key** — Mobile Crawler resolves it automatically from:
+1. `.mobsf_api_key` file in the repo root
+2. Docker container logs (if using the managed container)
+3. `CRAWLER_MOBSF_API_KEY` environment variable
 
-```powershell
-.\scripts\start.ps1
+Reports are saved under the run session folder:
+
+```
+output_data/run_{ID}_{timestamp}/reports/
 ```
 
-The launcher starts MobSF with the expected container name, saves the API key to `.mobsf_api_key` when it can extract it from the container logs, then starts the GUI.
+---
 
-### Configure MobSF API Key
+## PCAPdroid Traffic Capture
 
-MobSF requires an API key for REST calls. Mobile Crawler resolves the key automatically in this order:
+1. Install PCAPdroid from Google Play on the device.
+2. Enable TLS decryption in PCAPdroid settings and install PCAPdroid-mitm when prompted.
+3. In PCAPdroid → Control Permissions → generate an API key.
+4. Paste the API key in Mobile Crawler Settings → Integrations.
+5. Enable Traffic Capture before starting a crawl.
 
-1. `.mobsf_api_key` in the repository root or a parent directory.
-2. Docker logs from the managed `mobile-crawler-mobsf` container.
-3. Legacy `CRAWLER_MOBSF_API_KEY` / `mobsf_api_key` sources for backward compatibility.
-4. Fail with a clear setup error if no key is available.
+Capture files are saved to `output_data/run_{ID}_{timestamp}/pcap/`.
 
-To create the key file manually, copy the REST API key printed in the MobSF Docker logs and write it to `.mobsf_api_key`:
+---
 
-```powershell
-Set-Content -Path .mobsf_api_key -Value "<your_mobsf_api_key>"
+## Session Artifacts
+
+Each run creates a folder under `output_data/`:
+
 ```
-
-The default MobSF URL is `http://localhost:8000`. Change the MobSF API URL in the GUI settings only if you run MobSF elsewhere.
-
-### Run MobSF Analysis
-
-Automatic after crawl:
-
-```powershell
-mobile-crawler-cli crawl --device emulator-5554 --package com.example.app --provider gemini --model gemini-1.5-flash --enable-mobsf-analysis
-```
-
-In the GUI, enable MobSF analysis in Settings before starting a crawl. MobSF runs only after a successful, non-cancelled crawl. If MobSF fails, the crawl remains completed and the failure is written to logs.
-
-Manual from history:
-
-1. Open the GUI.
-2. Select a completed run in Run History.
-3. Click `Run MobSF`.
-4. Wait for the background analysis to finish.
-
-The manual button uses the run's stored device ID and package name, so the same device or emulator should still be available through ADB.
-
-## Runtime Architecture
-
-The current crawl flow is:
-
-1. `run_cli.py`, `mobile-crawler-cli`, `mobile-crawler-gui`, or `.\scripts\start.ps1` starts the CLI or GUI.
-2. The CLI `crawl` command or GUI `MainWindow` creates a run record, prepares `ConfigManager`, repositories, and `SessionFolderManager`, then runs `CrawlerLoop`.
-3. `CrawlerLoop` creates a timestamped session folder, stores the session path on the run, emits lifecycle events, attaches DroidRun logging, and calls `DroidRunAgentService.execute_exploration_task()`.
-4. `DroidRunAgentService` translates Mobile Crawler settings into a DroidRun `DroidConfig`, ensures the target package is active through ADB preflight checks, creates a DroidRun `DroidAgent`, and runs the DroidRun workflow.
-5. During execution, Mobile Crawler consumes DroidRun tool events for step phase tracking, forwards logs and stdout to UI/CLI listeners, handles duration limits and cancellation, tracks action outcomes from DroidRun shared state, retries app-crash-like failures, and cleans up async LLM clients.
-6. `CrawlerLoop` updates final run stats and emits completion or error events.
-7. If MobSF analysis is enabled and the crawl completed successfully, `CrawlerLoop` runs MobSF static analysis and logs the generated report paths.
-
-`CrawlerLoop` is intentionally thin. It manages Mobile Crawler run state, session folders, event forwarding, cancellation, logging, cleanup, and final stats; it does not own the exploration loop.
-
-## How DroidRun Is Used
-
-DroidRun is currently loaded from `external/droidrun`. `DroidRunAgentService._ensure_droidrun_import()` inserts that submodule path into `sys.path` before importing DroidRun classes such as `DroidConfig`, `DroidAgent`, and `ToolExecutionEvent`.
-
-Mobile Crawler does not own DroidRun's core exploration loop. DroidRun owns screenshot and UI-state capture, LLM planning and execution, agent workflows, and ADB-backed device actions.
-
-Mobile Crawler wraps DroidRun with:
-
-- Run and session persistence.
-- GUI/CLI event listeners.
-- SQLite repositories and configuration storage.
-- Session folders for screenshots, reports, PCAP files, videos, logs, data, and APKs.
-- DroidRun log forwarding to JSONL and UI logs.
-- Target-app preflight and app-switch/context guards.
-- Step phase tracking and action verification hooks.
-- Duration limits, cancellation requests, crash recovery, and LLM client cleanup.
-- Optional MobSF, PCAPdroid, video, and report/artifact infrastructure.
-
-## How UI Parsing Works With DroidRun
-
-DroidRun mainly uses Android Accessibility APIs, not pure screenshot vision first. Mobile Crawler passes parser settings into DroidRun through `DroidRunAgentService`, and DroidRun owns active screenshot capture, UI parsing, formatted state text, indexed element lookup, and ADB-backed action execution during the crawl.
-
-In the default `boost` mode, DroidRun uses the accessibility tree first and falls back to OmniParser only when accessibility metadata is unavailable or insufficient.
-
-The `ui_parser_mode` setting controls which UI source DroidRun uses:
-
-- `omniparser`: always parse screenshots with OmniParser.
-- `boost` (default): use accessibility data first, otherwise fall back to OmniParser.
-- `accessibility`: use accessibility data only.
-
-When OmniParser is used, DroidRun converts OmniParser bounding boxes into indexed UI elements with tap-ready bounds before presenting them to the agent. Mobile Crawler's local `OmniParserClient` and `UIContextManager` appear to be auxiliary diagnostic/cache code; they are not the active crawl path.
-
-## Project Boundaries
-
-Mobile Crawler owns:
-
-- PySide6 GUI and Click CLI.
-- Device and app selection UX.
-- Settings, secrets, defaults, and provider selection.
-- SQLite storage for runs, screens, step logs, transitions, stats, AI interactions, and step phases.
-- Session folder creation and artifact layout.
-- Reporting, run history, MobSF integration, PCAPdroid integration, and video capture hooks.
-- DroidRun orchestration, log forwarding, lifecycle events, and run-level status.
-
-DroidRun owns:
-
-- `DroidAgent` and active UI-agent execution.
-- Manager, executor, fast-agent, app-opener, and structured-output workflows.
-- Prompt templates and agent internals.
-- Android driver, state provider, UI action tools, and ADB-backed device actions.
-- LLM adapter implementations used by the agent runtime.
-
-## Configuration Notes
-
-Default values live in `src/mobile_crawler/config/defaults.py`. Notable defaults include:
-
-- `max_crawl_steps`: `15`
-- `max_crawl_duration_seconds`: `600`
-- `use_droidrun_agent`: `True`
-- `droidrun_reasoning_mode`: `True`
-- `droidrun_streaming`: `False`
-- `droidrun_telemetry_enabled`: `False`
-- `ui_parser_mode`: `boost`
-- `omniparser_backend`: `replicate`
-- optional traffic capture, video recording, and MobSF analysis disabled by default
-
-API keys can come from persisted secrets/settings or environment variables. `DroidRunAgentService` resolves provider keys and passes them into DroidRun LLM profiles.
-
-## Data Organization
-
-`SessionFolderManager` creates per-run folders under the app data directory's `output_data` folder by default:
-
-```text
 output_data/
 └── run_{ID}_{YYYYMMDD_HHMMSS}/
-    ├── screenshots/
-    ├── reports/
-    ├── pcap/
-    ├── videos/
-    ├── logs/
+    ├── screenshots/     ← annotated bounding-box screenshots, arrival screenshots
+    ├── reports/         ← MobSF JSON/PDF reports
+    ├── pcap/            ← network traffic capture
+    ├── videos/          ← screen recordings
+    ├── logs/            ← JSONL debug logs
     ├── data/
-    └── apks/
+    └── apks/            ← pulled APKs for MobSF upload
 ```
 
-The session path is stored on the run record so the UI can resolve artifacts later.
+---
 
-## Current Limitations
+## Configuration
 
-- Pause, resume, step-by-step mode, and manual next-step advancement are not supported in DroidRun mode. The current `CrawlerLoop` methods emit debug messages for those controls and do not pause the DroidRun workflow.
-- Current crawl execution is DroidRun-first through the editable runtime in `external/droidrun`.
-- The `use_droidrun_agent` setting remains in the UI/config, but the current `CrawlerLoop` implementation delegates traversal to DroidRun.
-- Removing `external/droidrun` requires vendoring or rewriting the active UI-agent runtime, including agent workflows, prompts, state capture, LLM adapters, and Android action tools.
+Default values are in [src/mobile_crawler/config/defaults.py](src/mobile_crawler/config/defaults.py). Key defaults:
+
+| Key | Default | Description |
+|---|---|---|
+| `crawl_mode` | `droidrun` | `droidrun` or `omni_sweep` |
+| `omni_sweep_mode` | `breadth` | `breadth` (recommended) or `depth` |
+| `omniparser_local_url` | `http://localhost:8000` | Local OmniParser server |
+| `omniparser_box_threshold` | `0.02` | Detection confidence threshold |
+| `max_crawl_steps` | `15` | Max element taps per crawl |
+| `max_crawl_duration_seconds` | `600` | Max crawl wall time |
+| `ui_parser_mode` | `boost` | DroidRun mode only |
+
+---
 
 ## Development
 
-```powershell
-pytest
+```bash
+cd src && pytest
 ruff check .
 black .
 pytest --cov=mobile_crawler --cov-report=html
 ```
 
-Documentation-only README edits do not require code tests. For runtime changes, prefer targeted tests around the modified module and a smoke run through the CLI or GUI path.
+Project layout:
+
+```
+src/mobile_crawler/
+├── cli/              ← Click CLI entry point
+├── config/           ← defaults, ConfigManager
+├── core/             ← CrawlerLoop, pre-crawl validator
+├── domain/           ← OmniParserSweepService, DroidRunAgentService,
+│                        ADBActionExecutor, OmniParserClient, prompts, ...
+├── infrastructure/   ← DatabaseManager, repositories, AIInteractionService
+└── ui/               ← PySide6 MainWindow, widgets (PathGraphWidget, ...)
+external/droidrun/    ← DroidRun submodule (AI agent runtime)
+tests/
+```
+
+---
 
 ## License
 

@@ -100,6 +100,68 @@ class ProviderRegistry:
             logger.error(f"Failed to fetch Gemini models: {e}")
             raise RuntimeError(f"Failed to fetch Gemini models from API. Please check your API key and internet connection: {e}") from e
 
+    def fetch_anthropic_models(self, api_key: str) -> List[Dict[str, Any]]:
+        """Fetch available Anthropic models.
+
+        Args:
+            api_key: Anthropic API key
+
+        Returns:
+            List of model dictionaries with 'id', 'name', and 'supports_vision' keys
+        """
+        cache_key = 'anthropic'
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        try:
+            response = requests.get(
+                'https://api.anthropic.com/v1/models',
+                headers={
+                    'x-api-key': api_key,
+                    'anthropic-version': '2023-06-01',
+                },
+                timeout=10
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            result = []
+
+            for model in data.get('data', []):
+                model_id = model.get('id', '')
+                result.append({
+                    'id': model_id,
+                    'name': model.get('display_name', model_id),
+                    'provider': 'anthropic',
+                    'supports_vision': self._is_anthropic_vision_model(model_id),
+                })
+
+            self._cache[cache_key] = result
+            self._save_persistent_cache()
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to fetch Anthropic models: {e}")
+            # Return fallback list with known vision-capable Claude models
+            return [
+                {'id': 'claude-haiku-4-5-20251001', 'name': 'Claude Haiku 4.5', 'provider': 'anthropic', 'supports_vision': True},
+                {'id': 'claude-sonnet-4-5-20250929', 'name': 'Claude Sonnet 4.5', 'provider': 'anthropic', 'supports_vision': True},
+                {'id': 'claude-opus-4-1-20250805', 'name': 'Claude Opus 4.1', 'provider': 'anthropic', 'supports_vision': True},
+            ]
+
+    def _is_anthropic_vision_model(self, model_id: str) -> bool:
+        """Check if an Anthropic model supports vision.
+
+        Args:
+            model_id: Anthropic model identifier
+
+        Returns:
+            True if model supports vision (all current Claude 3+ models do)
+        """
+        lower_id = model_id.lower()
+        # Claude 1/2 legacy text-only models don't support vision
+        return not (lower_id.startswith('claude-1') or lower_id.startswith('claude-2'))
+
     def fetch_openrouter_models(self, api_key: str) -> List[Dict[str, Any]]:
         """Fetch available OpenRouter models.
 

@@ -28,6 +28,7 @@ class StepLog:
     was_retried: bool = False
     retry_count: int = 0
     recovery_time_ms: Optional[float] = None
+    screenshot_path: Optional[str] = None  # annotated bounding-box screenshot for this step
 
 
 class StepLogRepository:
@@ -59,8 +60,8 @@ class StepLogRepository:
                 action_type, action_description, target_bbox_json, input_text,
                 execution_success, error_message, action_duration_ms,
                 ai_response_time_ms, ai_reasoning, was_retried,
-                retry_count, recovery_time_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                retry_count, recovery_time_ms, screenshot_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             step_log.run_id,
             step_log.step_number,
@@ -78,7 +79,8 @@ class StepLogRepository:
             step_log.ai_reasoning,
             step_log.was_retried,
             step_log.retry_count,
-            step_log.recovery_time_ms
+            step_log.recovery_time_ms,
+            step_log.screenshot_path
         ))
 
         conn.commit()
@@ -101,7 +103,7 @@ class StepLogRepository:
                    action_type, action_description, target_bbox_json, input_text,
                    execution_success, error_message, action_duration_ms,
                    ai_response_time_ms, ai_reasoning, was_retried,
-                   retry_count, recovery_time_ms
+                   retry_count, recovery_time_ms, screenshot_path
             FROM step_logs
             WHERE run_id = ?
             ORDER BY step_number
@@ -127,7 +129,8 @@ class StepLogRepository:
                 ai_reasoning=row[14],
                 was_retried=bool(row[15]),
                 retry_count=row[16],
-                recovery_time_ms=row[17]
+                recovery_time_ms=row[17],
+                screenshot_path=row[18]
             ))
 
         return step_logs

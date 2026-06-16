@@ -87,16 +87,32 @@ class OmniParserClient:
             logger.error(f"Replicate API error: {e}")
             raise RuntimeError(f"OmniParser Replicate error: {e}")
 
-    def _parse_local(self, image_bytes: bytes) -> List[Dict[str, Any]]:
+    def _parse_local(self, image_bytes: bytes, max_side: int = 1080) -> List[Dict[str, Any]]:
         local_url = self.config_manager.get("omniparser_local_url", "http://localhost:8000")
         box_threshold = self.config_manager.get("omniparser_box_threshold", 0.05)
+
+        # Downsample large screenshots before sending — cuts CPU inference time significantly.
+        try:
+            from PIL import Image as _Img
+            import io as _io
+            img = _Img.open(_io.BytesIO(image_bytes))
+            w, h = img.size
+            if max(w, h) > max_side:
+                scale = max_side / max(w, h)
+                img = img.resize((int(w * scale), int(h * scale)), _Img.LANCZOS)
+                buf = _io.BytesIO()
+                img.save(buf, format="PNG")
+                image_bytes = buf.getvalue()
+        except Exception:
+            pass
+
         b64_image = base64.b64encode(image_bytes).decode("utf-8")
 
         try:
             response = requests.post(
                 f"{local_url}/parse",
                 json={"base64_image": b64_image, "box_threshold": box_threshold},
-                timeout=30,
+                timeout=120,
             )
             if response.status_code != 200:
                 raise RuntimeError(f"Local OmniParser error: {response.status_code}")

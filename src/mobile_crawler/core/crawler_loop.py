@@ -163,16 +163,27 @@ class CrawlerLoop:
             self._transition_state("RUNNING", run_id)
             self._emit_event("on_crawl_started", run_id, run.app_package)
 
-            self._droidrun_agent_service = DroidRunAgentService(
-                config_manager=self.config_manager,
-                ai_interaction_repository=self._ai_interaction_repository,
-                device_id=run.device_id
-            )
+            crawl_mode = self.config_manager.get("crawl_mode", "droidrun")
+            if crawl_mode == "omni_sweep":
+                from mobile_crawler.domain.omniparser_sweep_service import OmniParserSweepService
+                self._droidrun_agent_service = OmniParserSweepService(
+                    config_manager=self.config_manager,
+                    ai_interaction_repository=self._ai_interaction_repository,
+                    device_id=run.device_id
+                )
+            else:
+                self._droidrun_agent_service = DroidRunAgentService(
+                    config_manager=self.config_manager,
+                    ai_interaction_repository=self._ai_interaction_repository,
+                    device_id=run.device_id
+                )
 
             # Initialize step phase tracking per D-01 (wrap at action level)
+            screenshots_dir = self.session_folder_manager.get_subfolder(run, "screenshots")
             self._droidrun_agent_service.begin_step_tracking(
                 run_id=run_id,
                 emit_step_phase_event=self._emit_event,
+                screenshots_dir=screenshots_dir,
             )
 
             logs_dir = self.session_folder_manager.get_subfolder(run, "logs")
@@ -436,8 +447,9 @@ class CrawlerLoop:
     def get_span_stats(self):
         """Return current OTel span stats from the active agent service, or None."""
         svc = self._droidrun_agent_service
-        if svc is not None:
-            return svc._stats_processor.get_stats()
+        stats_processor = getattr(svc, "_stats_processor", None)
+        if stats_processor is not None:
+            return stats_processor.get_stats()
         return None
 
     def _run_async(self, coroutine):

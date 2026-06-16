@@ -703,6 +703,41 @@ class ADBActionExecutor:
             logger.error(f"Failed to get current activity: {e}")
             return None
 
+    def get_screen_title(self) -> Optional[str]:
+        """Extract the visible page title from the UI hierarchy.
+
+        Dumps the accessibility window hierarchy and returns the first
+        non-empty text or content-desc found at the top of the tree.
+        For React Native apps this is the navigation header title,
+        which is unique per screen even when the Activity name is the same.
+
+        Returns:
+            Page title string, or None if extraction fails or times out.
+        """
+        try:
+            import re as _re
+            tmp = "/sdcard/_mc_uititle.xml"
+            success, _, _ = self._execute_adb_command(
+                ['shell', f'uiautomator dump {tmp}'],
+                timeout=8,
+            )
+            if not success:
+                return None
+            success2, output, _ = self._execute_adb_command(
+                ['shell', f'cat {tmp}'],
+                timeout=5,
+            )
+            if not success2 or not output:
+                return None
+            texts = _re.findall(r'(?:text|content-desc)="([^"]+)"', output)
+            for t in texts:
+                t = t.strip()
+                if 3 <= len(t) <= 80:
+                    return t
+            return None
+        except Exception:
+            return None
+
     def get_resumed_activity(self) -> Optional[Tuple[str, str]]:
         """Get the resumed (foreground) activity from ActivityManager.
 

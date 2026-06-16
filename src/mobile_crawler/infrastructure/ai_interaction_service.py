@@ -113,6 +113,14 @@ class AIInteractionService:
             adapter = OpenRouterAdapter()
             adapter.initialize({'model': model_name, 'api_key': api_key}, {})
             return adapter
+        elif provider == 'anthropic':
+            from mobile_crawler.domain.providers.anthropic_adapter import AnthropicAdapter
+            api_key = config_manager.get('anthropic_api_key')
+            if not api_key:
+                raise ValueError("Anthropic API key not configured")
+            adapter = AnthropicAdapter()
+            adapter.initialize({'model': model_name, 'api_key': api_key}, {})
+            return adapter
         elif provider == 'ollama':
             from mobile_crawler.domain.providers.ollama_adapter import OllamaAdapter
             adapter = OllamaAdapter()

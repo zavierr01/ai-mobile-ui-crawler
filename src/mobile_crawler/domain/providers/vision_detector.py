@@ -50,6 +50,11 @@ class VisionDetector:
                 raise ValueError("API key is required for OpenRouter provider")
             models = self._registry.fetch_openrouter_models(api_key)
 
+        elif provider == 'anthropic':
+            if not api_key:
+                raise ValueError("API key is required for Anthropic provider")
+            models = self._registry.fetch_anthropic_models(api_key)
+
         elif provider == 'ollama':
             models = self._registry.fetch_ollama_models(base_url or 'http://localhost:11434')
 

@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any
 from mobile_crawler.config.config_manager import ConfigManager
 from mobile_crawler.domain.models import ActionResult, AIResponse, AIAction, BoundingBox
 from mobile_crawler.infrastructure.ai_interaction_repository import AIInteraction, AIInteractionRepository
+from mobile_crawler.infrastructure.step_log_repository import StepLog
 
 from mobile_crawler.domain.stats_collector_span_processor import StatsCollectorSpanProcessor, OTEL_AVAILABLE
 from mobile_crawler.domain.errors import FatalError, ErrorContext
@@ -170,6 +171,8 @@ class DroidRunAgentService:
         self._current_run_id: Optional[int] = None
         self._current_step_number: int = 0
         self._emit_step_phase_event = None  # Callback to CrawlerLoop._emit_event
+        self._step_log_repository = None
+        self._screenshots_dir: Optional[str] = None
 
         # Initialize OmniParser if available
         if OMNIPARSER_AVAILABLE:
@@ -197,7 +200,7 @@ class DroidRunAgentService:
         provider_mapping = {
             "gemini": "GoogleGenAI",
             "openai": "OpenAI",
-            "anthropic": "AnthropicAI",
+            "anthropic": "Anthropic",
             "ollama": "Ollama",
             "openrouter": "OpenRouter",
         }
@@ -476,6 +479,7 @@ class DroidRunAgentService:
         self,
         run_id: int,
         emit_step_phase_event=None,
+        screenshots_dir: Optional[str] = None,
     ) -> None:
         """Initialize step phase tracking for a run.
 
@@ -484,10 +488,12 @@ class DroidRunAgentService:
             emit_step_phase_event: Callback to emit phase transition events
                                     to CrawlerLoop listeners. Signature:
                                     (method_name, *args) -> None
+            screenshots_dir: Directory to save per-step bounding-box screenshots.
         """
         self._current_run_id = run_id
         self._current_step_number = 0
         self._emit_step_phase_event = emit_step_phase_event
+        self._screenshots_dir = screenshots_dir
 
         # Initialize step phase machine with a listener that persists transitions
         self._step_phase_machine = StepPhaseStateMachine()
@@ -495,8 +501,10 @@ class DroidRunAgentService:
 
         # Initialize repository for persistence
         from mobile_crawler.infrastructure.database import DatabaseManager
+        from mobile_crawler.infrastructure.step_log_repository import StepLogRepository
         db_manager = DatabaseManager()
         self._step_phase_repository = StepPhaseRepository(db_manager)
+        self._step_log_repository = StepLogRepository(db_manager)
 
         # Initialize wait predicate and verifier (lazy -- will be fully wired
         # when DroidRun agent provides state_provider/driver)
@@ -631,6 +639,123 @@ class DroidRunAgentService:
             except Exception as e:
                 logger.warning(f"Failed to emit step phase event: {e}")
 
+    # Action tools that target a specific UI element by index
+    _INDEX_TARGETED_TOOLS = {"click", "long_press", "tap", "input_text"}
+    # Action tools that target raw screen coordinates
+    _COORD_TARGETED_TOOLS = {"click_at", "long_press_at", "swipe", "drag"}
+
+    async def _capture_step_screenshot(self, event, tool_name: str, success: bool) -> None:
+        """Capture a screenshot annotated with the bounding box of the
+        element (or coordinates) targeted by this tool execution, and
+        persist it alongside a step_logs row.
+
+        Best-effort: any failure is logged and swallowed by the caller.
+        """
+        if not self._screenshots_dir or not self._step_log_repository:
+            return
+        if not self._droid_agent:
+            return
+
+        action_ctx = getattr(self._droid_agent, "action_ctx", None)
+        if action_ctx is None:
+            return
+
+        driver = getattr(action_ctx, "driver", None)
+        ui_state = getattr(action_ctx, "ui", None)
+        tool_args = getattr(event, "tool_args", {}) or {}
+
+        bbox = None  # (left, top, right, bottom)
+
+        if tool_name in self._INDEX_TARGETED_TOOLS and ui_state is not None:
+            index = tool_args.get("index")
+            if index is not None:
+                element = ui_state.get_element(index)
+                bounds_str = element.get("bounds") if element else None
+                if bounds_str:
+                    try:
+                        left, top, right, bottom = map(int, bounds_str.split(","))
+                        bbox = (left, top, right, bottom)
+                    except ValueError:
+                        bbox = None
+
+        if bbox is None and tool_name in self._COORD_TARGETED_TOOLS:
+            x = tool_args.get("x", tool_args.get("start_x"))
+            y = tool_args.get("y", tool_args.get("start_y"))
+            if x is not None and y is not None:
+                # No element bounds available — draw a small marker box around the point
+                half = 30
+                bbox = (int(x) - half, int(y) - half, int(x) + half, int(y) + half)
+
+        if driver is None:
+            return
+
+        try:
+            screenshot_bytes = await driver.screenshot()
+        except Exception as e:
+            logger.debug(f"Failed to capture screenshot for step {self._current_step_number}: {e}")
+            return
+
+        if not screenshot_bytes:
+            return
+
+        screenshot_path = None
+        try:
+            from io import BytesIO
+            from PIL import Image, ImageDraw
+
+            image = Image.open(BytesIO(screenshot_bytes)).convert("RGB")
+
+            if bbox is not None:
+                left, top, right, bottom = bbox
+                # Clamp to image bounds
+                left = max(0, min(left, image.width - 1))
+                top = max(0, min(top, image.height - 1))
+                right = max(0, min(right, image.width))
+                bottom = max(0, min(bottom, image.height))
+
+                draw = ImageDraw.Draw(image)
+                draw.rectangle([left, top, right, bottom], outline=(255, 0, 0), width=8)
+
+            os.makedirs(self._screenshots_dir, exist_ok=True)
+            filename = f"step_{self._current_step_number:04d}_{tool_name}.png"
+            screenshot_path = os.path.join(self._screenshots_dir, filename)
+            image.save(screenshot_path)
+        except Exception as e:
+            logger.debug(f"Failed to annotate/save screenshot for step {self._current_step_number}: {e}")
+            screenshot_path = None
+
+        # Persist a step_logs row with the bbox + screenshot path
+        try:
+            target_bbox_json = None
+            if bbox is not None:
+                left, top, right, bottom = bbox
+                target_bbox_json = json.dumps({
+                    "top_left": [left, top],
+                    "bottom_right": [right, bottom],
+                })
+
+            step_log = StepLog(
+                id=None,
+                run_id=self._current_run_id,
+                step_number=self._current_step_number,
+                timestamp=datetime.now(),
+                from_screen_id=None,
+                to_screen_id=None,
+                action_type=tool_name,
+                action_description=getattr(event, "summary", None),
+                target_bbox_json=target_bbox_json,
+                input_text=tool_args.get("text"),
+                execution_success=success,
+                error_message=None,
+                action_duration_ms=None,
+                ai_response_time_ms=None,
+                ai_reasoning=None,
+                screenshot_path=screenshot_path,
+            )
+            self._step_log_repository.create_step_log(step_log)
+        except Exception as e:
+            logger.debug(f"Failed to persist step log for step {self._current_step_number}: {e}")
+
     async def _handle_tool_execution_event(self, event) -> None:
         """Handle a ToolExecutionEvent from DroidRun's event stream.
 
@@ -656,6 +781,15 @@ class DroidRunAgentService:
             f"Step {self._current_step_number}: tool={tool_name} "
             f"success={success}"
         )
+
+        # Capture a bounding-box screenshot of the element that was interacted with
+        try:
+            await self._capture_step_screenshot(event, tool_name, success)
+        except Exception as e:
+            logger.warning(
+                f"Step {self._current_step_number}: failed to capture "
+                f"bounding-box screenshot: {e}"
+            )
 
         # --- Context pre-check (D-02): compare package against target ---
         skip_reason = None

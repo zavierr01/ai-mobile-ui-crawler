@@ -145,6 +145,7 @@ class AIModelSelector(QWidget):
         providers = [
             ("Gemini", "gemini"),
             ("OpenRouter", "openrouter"),
+            ("Anthropic", "anthropic"),
             ("Ollama (Local)", "ollama"),
         ]
         
@@ -219,7 +220,7 @@ class AIModelSelector(QWidget):
 
         # Get API key for providers that require it
         api_key = None
-        if provider in ['gemini', 'openrouter']:
+        if provider in ['gemini', 'openrouter', 'anthropic']:
             if self._api_key_callback:
                 api_key = self._api_key_callback(provider)
             

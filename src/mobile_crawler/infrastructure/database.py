@@ -101,6 +101,7 @@ class DatabaseManager:
                 retry_count INTEGER DEFAULT 0,
                 recovery_time_ms REAL,
                 current_phase TEXT DEFAULT 'capture',
+                screenshot_path TEXT,
                 FOREIGN KEY (run_id) REFERENCES runs(id),
                 FOREIGN KEY (from_screen_id) REFERENCES screens(id),
                 FOREIGN KEY (to_screen_id) REFERENCES screens(id)
@@ -280,6 +281,38 @@ class DatabaseManager:
             )
         """)
 
+        # element_groups table (OmniParser Sweep mode)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS element_groups (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER NOT NULL,
+                screen_signature TEXT NOT NULL,
+                bbox_json TEXT NOT NULL,
+                member_bboxes_json TEXT,
+                label TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                outcome_reason TEXT,
+                last_step_number INTEGER,
+                FOREIGN KEY (run_id) REFERENCES runs(id)
+            )
+        """)
+
+        # omni_sweep_edges table — navigation path graph for OmniParser Sweep mode
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS omni_sweep_edges (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER NOT NULL,
+                from_signature TEXT NOT NULL,
+                to_signature TEXT NOT NULL,
+                group_label TEXT,
+                step_number INTEGER NOT NULL,
+                to_screenshot_path TEXT,
+                from_bbox_json TEXT,
+                FOREIGN KEY (run_id) REFERENCES runs(id),
+                UNIQUE(run_id, from_signature, to_signature, from_bbox_json)
+            )
+        """)
+
         # Create indexes for performance
         conn.execute("CREATE INDEX IF NOT EXISTS idx_step_logs_run ON step_logs(run_id, step_number)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_screens_hash ON screens(composite_hash)")
@@ -289,6 +322,14 @@ class DatabaseManager:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_omni_cache_screen ON omni_parser_cache(screen_key)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_phase_transitions_run ON step_phase_transitions(run_id, step_number)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_element_groups_run_screen "
+            "ON element_groups(run_id, screen_signature)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_omni_sweep_edges_run "
+            "ON omni_sweep_edges(run_id, from_signature)"
+        )
 
         conn.commit()
 
@@ -337,6 +378,42 @@ class DatabaseManager:
                 conn.execute("ALTER TABLE step_phase_transitions ADD COLUMN current_package TEXT DEFAULT NULL")
             if "current_activity" not in columns:
                 conn.execute("ALTER TABLE step_phase_transitions ADD COLUMN current_activity TEXT DEFAULT NULL")
+
+            # Migration for step_logs.screenshot_path (annotated bounding-box screenshots)
+            cursor = conn.execute("PRAGMA table_info(step_logs)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "screenshot_path" not in columns:
+                conn.execute("ALTER TABLE step_logs ADD COLUMN screenshot_path TEXT")
+
+            # Migration for omni_sweep_edges: add to_screenshot_path + unique constraint
+            cursor = conn.execute("PRAGMA table_info(omni_sweep_edges)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "to_screenshot_path" not in columns:
+                conn.execute("ALTER TABLE omni_sweep_edges ADD COLUMN to_screenshot_path TEXT")
+            # Migration for omni_sweep_edges.from_bbox_json
+            cursor = conn.execute("PRAGMA table_info(omni_sweep_edges)")
+            columns = [row["name"] for row in cursor.fetchall()]
+            if "from_bbox_json" not in columns:
+                conn.execute("ALTER TABLE omni_sweep_edges ADD COLUMN from_bbox_json TEXT")
+
+            # Ensure unique index is on (run_id, from_sig, to_sig, from_bbox_json).
+            # Drop old narrower index if it exists, then recreate.
+            old_idx = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_omni_sweep_edges_unique'"
+            ).fetchone()
+            if old_idx:
+                # Check if it includes from_bbox_json by inspecting sql
+                idx_sql = conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE name='idx_omni_sweep_edges_unique'"
+                ).fetchone()
+                if idx_sql and "from_bbox_json" not in (idx_sql["sql"] or ""):
+                    conn.execute("DROP INDEX idx_omni_sweep_edges_unique")
+                    old_idx = None
+            if not old_idx:
+                conn.execute(
+                    "CREATE UNIQUE INDEX idx_omni_sweep_edges_unique "
+                    "ON omni_sweep_edges(run_id, from_signature, to_signature, from_bbox_json)"
+                )
 
             conn.commit()
         except sqlite3.OperationalError as e:

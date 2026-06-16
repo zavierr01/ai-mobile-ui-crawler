@@ -91,11 +91,16 @@ DEFAULTS: Dict[str, Any] = {
     "droidrun_streaming": False,
     # DroidRun agent retry count for failed operations
     "droidrun_retry_count": 2,
+    # Crawl mode: "droidrun" (AI agent navigates step-by-step) or
+    # "omni_sweep" (deterministic OmniParser sweep of each screen)
+    "crawl_mode": "droidrun",
+    # Navigation strategy for omni_sweep mode: "breadth" or "depth"
+    "omni_sweep_mode": "breadth",
     # UI parser strategy: accessibility-first with OmniParser fallback
     "ui_parser_mode": "boost",
-    "omniparser_backend": "replicate",
+    "omniparser_backend": "local",
     "omniparser_local_url": "http://localhost:8000",
-    "omniparser_box_threshold": 0.05,
+    "omniparser_box_threshold": 0.02,
     "omniparser_cache_ttl_days": 30,
     "omniparser_a11y_ratio_threshold": 0.5,
     # Adaptive wait profiles for UI synchronization (replaces fixed sleeps)

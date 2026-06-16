@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMenu,
     QApplication,
+    QTabWidget,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QIcon
@@ -48,6 +49,7 @@ from mobile_crawler.ui.widgets.log_viewer import LogViewer
 from mobile_crawler.ui.widgets.stats_dashboard import StatsDashboard
 from mobile_crawler.ui.widgets.settings_panel import SettingsPanel
 from mobile_crawler.ui.widgets.run_history_view import RunHistoryView
+from mobile_crawler.ui.widgets.path_graph_widget import PathGraphWidget
 from mobile_crawler.ui.log_cleaner import LogCleaner
 
 # Signal adapter
@@ -185,6 +187,7 @@ class MainWindow(QMainWindow):
         self.stats_dashboard: StatsDashboard = None
         self.settings_panel: SettingsPanel = None
         self.run_history_view: RunHistoryView = None
+        self.path_graph_widget: PathGraphWidget = None
         self._log_cleaner = LogCleaner()
 
         # Signal adapter for thread-safe event bridging
@@ -376,6 +379,14 @@ class MainWindow(QMainWindow):
             run.id = run_id  # Ensure the object has the assigned ID
             self._current_run_id = run_id
 
+            # Start live path-graph refresh if in omni_sweep mode
+            if self.path_graph_widget:
+                crawl_mode = self._services["user_config_store"].get_setting(
+                    "crawl_mode", default="droidrun"
+                )
+                if crawl_mode == "omni_sweep":
+                    self.path_graph_widget.start_live_refresh(run_id)
+
             # Initialize statistics tracking
             self._current_stats = CrawlStatistics(run_id=run_id, start_time=datetime.now())
 
@@ -436,7 +447,7 @@ class MainWindow(QMainWindow):
             return False
 
         # Check API key for providers that require it
-        if self._ai_provider in ["gemini", "openrouter"]:
+        if self._ai_provider in ["gemini", "openrouter", "anthropic"]:
             api_key = self._get_api_key_for_provider(self._ai_provider)
             if not api_key:
                 self._show_error("API Key Missing", f"Please configure your {self._ai_provider} API key in Settings.")
@@ -601,6 +612,10 @@ class MainWindow(QMainWindow):
 
     def _on_crawl_finished(self) -> None:
         """Handle crawl completion."""
+        if self.path_graph_widget:
+            self.path_graph_widget.stop_live_refresh()
+            if self._current_run_id is not None:
+                self.path_graph_widget.refresh(self._current_run_id)
         self._update_crawl_ui_state(running=False)
         self._crawler_worker = None
         self._current_run_id = None
@@ -612,6 +627,8 @@ class MainWindow(QMainWindow):
         Args:
             error_msg: Error message
         """
+        if self.path_graph_widget:
+            self.path_graph_widget.stop_live_refresh()
         self._show_error("Crawl Error", error_msg)
         self._update_crawl_ui_state(running=False)
         self._crawler_worker = None
@@ -992,15 +1009,24 @@ class MainWindow(QMainWindow):
         return panel
 
     def _create_right_panel(self) -> QWidget:
-        """Create the right panel with log viewer."""
+        """Create the right panel with log viewer and path graph tabs."""
         panel = QWidget()
         layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
 
         self.log_viewer = LogViewer()
         self.log_viewer.setObjectName("logViewer")
+        tabs.addTab(self.log_viewer, "Logs")
 
-        layout.addWidget(self.log_viewer)
+        self.path_graph_widget = PathGraphWidget()
+        self.path_graph_widget.setObjectName("pathGraphWidget")
+        tabs.addTab(self.path_graph_widget, "Path Graph")
 
+        layout.addWidget(tabs)
         return panel
 
     def _create_bottom_panel(self) -> QWidget:
@@ -1084,6 +1110,8 @@ class MainWindow(QMainWindow):
             return self.settings_panel.get_gemini_api_key()
         elif provider == "openrouter":
             return self.settings_panel.get_openrouter_api_key()
+        elif provider == "anthropic":
+            return self.settings_panel.get_anthropic_api_key()
         elif provider == "ollama":
             # Ollama doesn't need API key
             return "ollama"

@@ -2,25 +2,26 @@
 
 from typing import TYPE_CHECKING
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
+    QButtonGroup,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QTextEdit,
-    QSpinBox,
-    QGroupBox,
-    QPushButton,
     QMessageBox,
+    QPushButton,
     QRadioButton,
-    QButtonGroup,
-    QCheckBox,
-    QTabWidget,
     QScrollArea,
-    QComboBox,
+    QSpinBox,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal
 
 if TYPE_CHECKING:
     from mobile_crawler.infrastructure.user_config_store import UserConfigStore
@@ -80,22 +81,19 @@ class SettingsPanel(QWidget):
         """Create the General settings tab."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setSpacing(10)
 
-        # Group box for Crawl Limits
+        # ── Crawl Limits ──────────────────────────────────────────────
         limits_group = QGroupBox("Crawl Limits")
         limits_layout = QVBoxLayout()
-
-        # Radio buttons for limit type selection
         self.limit_button_group = QButtonGroup(self)
 
-        # Max Steps option
         max_steps_layout = QHBoxLayout()
         self.steps_radio = QRadioButton()
         self.steps_radio.setChecked(True)
         self.limit_button_group.addButton(self.steps_radio, 0)
         max_steps_layout.addWidget(self.steps_radio)
-        max_steps_label = QLabel("Max Steps:")
-        max_steps_layout.addWidget(max_steps_label)
+        max_steps_layout.addWidget(QLabel("Max Steps:"))
         self.max_steps_input = QSpinBox()
         self.max_steps_input.setRange(1, 10000)
         self.max_steps_input.setValue(100)
@@ -104,13 +102,11 @@ class SettingsPanel(QWidget):
         max_steps_layout.addStretch()
         limits_layout.addLayout(max_steps_layout)
 
-        # Max Duration option
         max_duration_layout = QHBoxLayout()
         self.duration_radio = QRadioButton()
         self.limit_button_group.addButton(self.duration_radio, 1)
         max_duration_layout.addWidget(self.duration_radio)
-        max_duration_label = QLabel("Max Duration (seconds):")
-        max_duration_layout.addWidget(max_duration_label)
+        max_duration_layout.addWidget(QLabel("Max Duration (seconds):"))
         self.max_duration_input = QSpinBox()
         self.max_duration_input.setRange(10, 3600)
         self.max_duration_input.setValue(300)
@@ -124,203 +120,237 @@ class SettingsPanel(QWidget):
         limits_group.setLayout(limits_layout)
         layout.addWidget(limits_group)
 
-        # Group box for Screen Configuration
-        screen_group = QGroupBox("Screen Configuration")
-        screen_layout = QVBoxLayout()
+        # ── Mode Selector ─────────────────────────────────────────────
+        mode_group = QGroupBox("Crawl Mode")
+        mode_group.setStyleSheet("QGroupBox { font-weight: bold; }")
+        mode_layout = QVBoxLayout()
 
-        top_bar_layout = QHBoxLayout()
-        top_bar_label = QLabel("Exclude Top Bar (pixels):")
-        top_bar_layout.addWidget(top_bar_label)
-        self.top_bar_height_input = QSpinBox()
-        self.top_bar_height_input.setRange(0, 500)
-        self.top_bar_height_input.setValue(0)
-        self.top_bar_height_input.setToolTip(
-            "Exclude the Android status bar from OCR and AI analysis. Typically 80-120px."
+        mode_row = QHBoxLayout()
+        mode_row.addWidget(QLabel("Mode:"))
+        self.crawl_mode_combo = QComboBox()
+        self.crawl_mode_combo.addItem("🤖  DroidRun AI Agent", "droidrun")
+        self.crawl_mode_combo.addItem("🔍  OmniParser Sweep", "omni_sweep")
+        self.crawl_mode_combo.setMinimumHeight(32)
+        mode_row.addWidget(self.crawl_mode_combo)
+        mode_row.addStretch()
+        mode_layout.addLayout(mode_row)
+        mode_group.setLayout(mode_layout)
+        layout.addWidget(mode_group)
+
+        # ── DroidRun Settings (visible only when DroidRun selected) ───
+        self.droidrun_settings_group = QGroupBox("DroidRun AI Agent Settings")
+        self.droidrun_settings_group.setStyleSheet(
+            "QGroupBox { border: 1px solid #3a6ea5; border-radius: 4px; margin-top: 6px; }"
+            "QGroupBox::title { color: #5b9bd5; }"
         )
-        top_bar_layout.addWidget(self.top_bar_height_input)
-        top_bar_layout.addStretch()
-        screen_layout.addLayout(top_bar_layout)
-
-        screen_group.setLayout(screen_layout)
-        layout.addWidget(screen_group)
-
-        layout.addStretch()
-        return self._wrap_in_scroll_area(tab)
-
-    def _setup_ai_tab(self) -> QWidget:
-        """Create the AI and agent settings tab."""
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setSpacing(15)
-
-        # Group box for API Keys
-        api_keys_group = QGroupBox("AI Provider Keys")
-        api_keys_layout = QVBoxLayout()
-
-        # Gemini API Key
-        gemini_layout = QHBoxLayout()
-        gemini_label = QLabel("Gemini API Key:")
-        gemini_layout.addWidget(gemini_label)
-        self.gemini_api_key_input = QLineEdit()
-        self.gemini_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.gemini_api_key_input.setPlaceholderText("Enter Gemini API key")
-        gemini_layout.addWidget(self.gemini_api_key_input)
-        api_keys_layout.addLayout(gemini_layout)
-
-        # OpenRouter API Key
-        openrouter_layout = QHBoxLayout()
-        openrouter_label = QLabel("OpenRouter API Key:")
-        openrouter_layout.addWidget(openrouter_label)
-        self.openrouter_api_key_input = QLineEdit()
-        self.openrouter_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.openrouter_api_key_input.setPlaceholderText("Enter OpenRouter API key")
-        openrouter_layout.addWidget(self.openrouter_api_key_input)
-        api_keys_layout.addLayout(openrouter_layout)
-
-        api_keys_group.setLayout(api_keys_layout)
-        layout.addWidget(api_keys_group)
-
-        # Test Credentials group
-        credentials_group = QGroupBox("App Test Credentials")
-        credentials_layout = QVBoxLayout()
-        credentials_layout.setSpacing(12)
-        credentials_layout.setContentsMargins(15, 20, 15, 20)
-
-        def create_credential_field(label_text, placeholder, is_password=False):
-            field_layout = QVBoxLayout()
-            field_layout.setSpacing(4)
-            label = QLabel(label_text)
-            label.setStyleSheet("font-weight: bold;")
-            field_layout.addWidget(label)
-            edit = QLineEdit()
-            edit.setPlaceholderText(placeholder)
-            edit.setMinimumHeight(30)
-            if is_password:
-                edit.setEchoMode(QLineEdit.EchoMode.Password)
-            field_layout.addWidget(edit)
-            return field_layout, edit
-
-        l, self.test_username_input = create_credential_field("Test Username:", "Enter test username")
-        credentials_layout.addLayout(l)
-
-        l, self.test_password_input = create_credential_field("Test Password:", "Enter test password", True)
-        credentials_layout.addLayout(l)
-
-        credentials_group.setLayout(credentials_layout)
-        layout.addWidget(credentials_group)
-
-        # DroidRun Agent group
-        droidrun_group = QGroupBox("DroidRun Agent")
-        droidrun_layout = QVBoxLayout()
-        droidrun_layout.setSpacing(12)
-        droidrun_layout.setContentsMargins(15, 20, 15, 20)
+        dr_layout = QVBoxLayout()
+        dr_layout.setSpacing(8)
 
         self.enable_droidrun_checkbox = QCheckBox("Enable DroidRun AI Agent")
         self.enable_droidrun_checkbox.setToolTip(
             "Use DroidRun's advanced multi-step planning agent instead of single-shot AI responses"
         )
-        droidrun_layout.addWidget(self.enable_droidrun_checkbox)
+        dr_layout.addWidget(self.enable_droidrun_checkbox)
 
         self.droidrun_reasoning_checkbox = QCheckBox("Use Reasoning Mode")
         self.droidrun_reasoning_checkbox.setToolTip(
-            "Enable complex planning with ManagerAgent -> ExecutorAgent cycles (vs direct execution)"
+            "Enable complex planning with ManagerAgent → ExecutorAgent cycles"
         )
         self.droidrun_reasoning_checkbox.setChecked(True)
-        droidrun_layout.addWidget(self.droidrun_reasoning_checkbox)
+        dr_layout.addWidget(self.droidrun_reasoning_checkbox)
 
-        max_cycles_layout = QHBoxLayout()
-        max_cycles_layout.addWidget(QLabel("Max Planning Cycles:"))
+        dr_cycles_row = QHBoxLayout()
+        dr_cycles_row.addWidget(QLabel("Max Planning Cycles:"))
         self.droidrun_max_cycles_input = QSpinBox()
         self.droidrun_max_cycles_input.setRange(1, 20)
         self.droidrun_max_cycles_input.setValue(5)
-        self.droidrun_max_cycles_input.setToolTip("Maximum planning/execution cycles for DroidRun agent")
-        max_cycles_layout.addWidget(self.droidrun_max_cycles_input)
-        max_cycles_layout.addStretch()
-        droidrun_layout.addLayout(max_cycles_layout)
+        dr_cycles_row.addWidget(self.droidrun_max_cycles_input)
+        dr_cycles_row.addStretch()
+        dr_layout.addLayout(dr_cycles_row)
 
         self.droidrun_streaming_checkbox = QCheckBox("Enable Streaming Output")
-        self.droidrun_streaming_checkbox.setToolTip("Show real-time agent planning and execution updates")
-        droidrun_layout.addWidget(self.droidrun_streaming_checkbox)
+        dr_layout.addWidget(self.droidrun_streaming_checkbox)
 
-        retry_layout = QHBoxLayout()
-        retry_layout.addWidget(QLabel("Agent Retry Count:"))
+        dr_retry_row = QHBoxLayout()
+        dr_retry_row.addWidget(QLabel("Agent Retry Count:"))
         self.droidrun_retry_count_input = QSpinBox()
         self.droidrun_retry_count_input.setRange(0, 10)
         self.droidrun_retry_count_input.setValue(2)
-        self.droidrun_retry_count_input.setToolTip("Number of retries for failed agent operations")
-        retry_layout.addWidget(self.droidrun_retry_count_input)
-        retry_layout.addStretch()
-        droidrun_layout.addLayout(retry_layout)
+        dr_retry_row.addWidget(self.droidrun_retry_count_input)
+        dr_retry_row.addStretch()
+        dr_layout.addLayout(dr_retry_row)
 
-        droidrun_group.setLayout(droidrun_layout)
-        layout.addWidget(droidrun_group)
-
-        # UI Parser group
-        parser_group = QGroupBox("UI Parser")
-        parser_layout = QVBoxLayout()
-        parser_layout.setSpacing(12)
-        parser_layout.setContentsMargins(15, 20, 15, 20)
-
-        parser_mode_layout = QHBoxLayout()
-        parser_mode_layout.addWidget(QLabel("Parser Mode:"))
+        parser_mode_row = QHBoxLayout()
+        parser_mode_row.addWidget(QLabel("UI Parser Mode:"))
         self.ui_parser_mode_combo = QComboBox()
         self.ui_parser_mode_combo.addItems(["boost", "omniparser", "accessibility"])
         self.ui_parser_mode_combo.setCurrentText("boost")
         self.ui_parser_mode_combo.setToolTip(
-            "UI parser mode: 'boost' (recommended, accessibility tree first with OmniParser fallback), "
-            "'omniparser' (vision-only), or 'accessibility' (a11y-only)."
+            "'boost': accessibility tree first, OmniParser fallback\n"
+            "'omniparser': vision-only\n"
+            "'accessibility': a11y-only"
         )
-        parser_mode_layout.addWidget(self.ui_parser_mode_combo)
-        parser_mode_layout.addStretch()
-        parser_layout.addLayout(parser_mode_layout)
-        parser_approach_hint = QLabel(
-            "DroidRun mainly uses Android Accessibility APIs. In 'boost' mode it uses the a11y tree first, "
-            "and falls back to OmniParser only when accessibility metadata is missing or weak."
-        )
-        parser_approach_hint.setWordWrap(True)
-        parser_approach_hint.setStyleSheet("color: #666; font-size: 11px;")
-        parser_layout.addWidget(parser_approach_hint)
+        parser_mode_row.addWidget(self.ui_parser_mode_combo)
+        parser_mode_row.addStretch()
+        dr_layout.addLayout(parser_mode_row)
 
-        replicate_layout = QHBoxLayout()
-        replicate_layout.addWidget(QLabel("Replicate API Key:"))
+        objective_label = QLabel("Exploration Objective:")
+        objective_label.setStyleSheet("font-weight: bold; margin-top: 4px;")
+        dr_layout.addWidget(objective_label)
+        self.exploration_objective_input = QTextEdit()
+        self.exploration_objective_input.setMaximumHeight(90)
+        self.exploration_objective_input.setPlaceholderText(
+            "Explore the app systematically. Navigate through different screens, "
+            "interact with UI elements, and discover the app's functionality."
+        )
+        dr_layout.addWidget(self.exploration_objective_input)
+
+        self.enable_droidrun_checkbox.toggled.connect(self._on_droidrun_enabled_changed)
+        self._on_droidrun_enabled_changed(self.enable_droidrun_checkbox.isChecked())
+        self.droidrun_settings_group.setLayout(dr_layout)
+        layout.addWidget(self.droidrun_settings_group)
+
+        # ── OmniParser Sweep Settings (visible only when Sweep selected) ──
+        self.sweep_settings_group = QGroupBox("OmniParser Sweep Settings")
+        self.sweep_settings_group.setStyleSheet(
+            "QGroupBox { border: 1px solid #2e7d32; border-radius: 4px; margin-top: 6px; }"
+            "QGroupBox::title { color: #66bb6a; }"
+        )
+        sw_layout = QVBoxLayout()
+        sw_layout.setSpacing(8)
+
+        nav_row = QHBoxLayout()
+        nav_row.addWidget(QLabel("Navigation Strategy:"))
+        self.omni_sweep_mode_combo = QComboBox()
+        self.omni_sweep_mode_combo.addItem("Breadth — tap all elements, return each time", "breadth")
+        self.omni_sweep_mode_combo.addItem("Depth — follow navigations recursively", "depth")
+        nav_row.addWidget(self.omni_sweep_mode_combo)
+        nav_row.addStretch()
+        sw_layout.addLayout(nav_row)
+
+        threshold_row = QHBoxLayout()
+        threshold_row.addWidget(QLabel("Box Detection Threshold:"))
+        self.omni_threshold_input = QDoubleSpinBox()
+        self.omni_threshold_input.setRange(0.01, 0.5)
+        self.omni_threshold_input.setSingleStep(0.01)
+        self.omni_threshold_input.setDecimals(2)
+        self.omni_threshold_input.setValue(0.02)
+        self.omni_threshold_input.setToolTip(
+            "Lower = more boxes detected (higher recall). Default 0.02."
+        )
+        threshold_row.addWidget(self.omni_threshold_input)
+        threshold_row.addStretch()
+        sw_layout.addLayout(threshold_row)
+
+        omni_hint = QLabel(
+            "All detected boxes are tapped. Boxes that navigate to the same destination are merged "
+            "afterwards. No LLM calls — purely deterministic."
+        )
+        omni_hint.setWordWrap(True)
+        omni_hint.setStyleSheet("color: #888; font-size: 11px;")
+        sw_layout.addWidget(omni_hint)
+
+        local_url_row = QHBoxLayout()
+        local_url_row.addWidget(QLabel("Local OmniParser URL:"))
+        self.omni_local_url_input = QLineEdit()
+        self.omni_local_url_input.setPlaceholderText("http://localhost:8000")
+        self.omni_local_url_input.setToolTip("URL of the locally running OmniParser server.")
+        local_url_row.addWidget(self.omni_local_url_input)
+        sw_layout.addLayout(local_url_row)
+
+        self.sweep_settings_group.setLayout(sw_layout)
+        layout.addWidget(self.sweep_settings_group)
+
+        # ── Screen Configuration ───────────────────────────────────────
+        screen_group = QGroupBox("Screen Configuration")
+        screen_layout = QVBoxLayout()
+        top_bar_layout = QHBoxLayout()
+        top_bar_layout.addWidget(QLabel("Exclude Top Bar (pixels):"))
+        self.top_bar_height_input = QSpinBox()
+        self.top_bar_height_input.setRange(0, 500)
+        self.top_bar_height_input.setValue(0)
+        self.top_bar_height_input.setToolTip("Exclude the Android status bar. Typically 80-120px.")
+        top_bar_layout.addWidget(self.top_bar_height_input)
+        top_bar_layout.addStretch()
+        screen_layout.addLayout(top_bar_layout)
+        screen_group.setLayout(screen_layout)
+        layout.addWidget(screen_group)
+
+        self.crawl_mode_combo.currentIndexChanged.connect(self._on_crawl_mode_changed)
+        self._on_crawl_mode_changed(self.crawl_mode_combo.currentIndex())
+
+        layout.addStretch()
+        return self._wrap_in_scroll_area(tab)
+
+    def _setup_ai_tab(self) -> QWidget:
+        """Create the AI / API Keys settings tab."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(12)
+
+        # ── AI Provider Keys ───────────────────────────────────────────
+        api_keys_group = QGroupBox("AI Provider API Keys")
+        api_keys_group.setToolTip("Used by DroidRun AI Agent mode only.")
+        api_layout = QVBoxLayout()
+        api_layout.setSpacing(8)
+
+        def _key_row(label_text, placeholder, attr_name):
+            row = QHBoxLayout()
+            lbl = QLabel(label_text)
+            lbl.setFixedWidth(160)
+            row.addWidget(lbl)
+            edit = QLineEdit()
+            edit.setEchoMode(QLineEdit.EchoMode.Password)
+            edit.setPlaceholderText(placeholder)
+            row.addWidget(edit)
+            setattr(self, attr_name, edit)
+            api_layout.addLayout(row)
+
+        _key_row("Gemini API Key:", "AIza…", "gemini_api_key_input")
+        _key_row("OpenRouter API Key:", "sk-or-…", "openrouter_api_key_input")
+        _key_row("Anthropic API Key:", "sk-ant-…", "anthropic_api_key_input")
+
+        api_note = QLabel("ℹ  API keys are only needed for DroidRun AI Agent mode.")
+        api_note.setStyleSheet("color: #888; font-size: 11px; margin-top: 4px;")
+        api_layout.addWidget(api_note)
+        api_keys_group.setLayout(api_layout)
+        layout.addWidget(api_keys_group)
+
+        # ── Test Credentials ───────────────────────────────────────────
+        credentials_group = QGroupBox("App Test Credentials")
+        cred_layout = QVBoxLayout()
+        cred_layout.setSpacing(8)
+
+        def _cred_row(label_text, placeholder, attr_name, is_password=False):
+            col = QVBoxLayout()
+            lbl = QLabel(label_text)
+            lbl.setStyleSheet("font-weight: bold;")
+            col.addWidget(lbl)
+            edit = QLineEdit()
+            edit.setPlaceholderText(placeholder)
+            edit.setMinimumHeight(28)
+            if is_password:
+                edit.setEchoMode(QLineEdit.EchoMode.Password)
+            col.addWidget(edit)
+            setattr(self, attr_name, edit)
+            cred_layout.addLayout(col)
+
+        _cred_row("Test Username:", "username / email", "test_username_input")
+        _cred_row("Test Password:", "password", "test_password_input", is_password=True)
+
+        credentials_group.setLayout(cred_layout)
+        layout.addWidget(credentials_group)
+
+        # ── Replicate key (OmniParser cloud backend) ───────────────────
+        replicate_group = QGroupBox("OmniParser Cloud Backend (optional)")
+        rep_layout = QHBoxLayout()
+        rep_layout.addWidget(QLabel("Replicate API Key:"))
         self.replicate_api_key_input = QLineEdit()
         self.replicate_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.replicate_api_key_input.setPlaceholderText("Enter Replicate API key for OmniParser")
-        self.replicate_api_key_input.setToolTip("API key for Replicate (used by OmniParser vision model)")
-        replicate_layout.addWidget(self.replicate_api_key_input)
-        parser_layout.addLayout(replicate_layout)
-
-        parser_group.setLayout(parser_layout)
-        layout.addWidget(parser_group)
-
-        # Exploration Objective group
-        objective_group = QGroupBox("Exploration Objective")
-        objective_layout = QVBoxLayout()
-        objective_layout.setSpacing(8)
-        objective_layout.setContentsMargins(15, 20, 15, 20)
-
-        objective_hint = QLabel(
-            "This prompt is sent to DroidRun as the exploration goal. Edit to customize the exploration behavior."
-        )
-        objective_hint.setWordWrap(True)
-        objective_hint.setStyleSheet("color: #666; font-size: 11px;")
-        objective_layout.addWidget(objective_hint)
-
-        self.exploration_objective_input = QTextEdit()
-        self.exploration_objective_input.setMaximumHeight(120)
-        objective_layout.addWidget(self.exploration_objective_input)
-
-        objective_group.setLayout(objective_layout)
-        layout.addWidget(objective_group)
-
-        def on_droidrun_enabled_changed(enabled):
-            self.droidrun_reasoning_checkbox.setEnabled(enabled)
-            self.droidrun_max_cycles_input.setEnabled(enabled)
-            self.droidrun_streaming_checkbox.setEnabled(enabled)
-            self.droidrun_retry_count_input.setEnabled(enabled)
-
-        self.enable_droidrun_checkbox.toggled.connect(on_droidrun_enabled_changed)
-        on_droidrun_enabled_changed(self.enable_droidrun_checkbox.isChecked())
+        self.replicate_api_key_input.setPlaceholderText("Leave blank to use local server")
+        rep_layout.addWidget(self.replicate_api_key_input)
+        replicate_group.setLayout(rep_layout)
+        layout.addWidget(replicate_group)
 
         layout.addStretch()
         return self._wrap_in_scroll_area(tab)
@@ -386,6 +416,19 @@ class SettingsPanel(QWidget):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         return scroll
 
+    def _on_crawl_mode_changed(self, index: int) -> None:
+        """Show/hide mode-specific settings groups based on selected crawl mode."""
+        is_omni_sweep = self.crawl_mode_combo.itemData(index) == "omni_sweep"
+        self.droidrun_settings_group.setVisible(not is_omni_sweep)
+        self.sweep_settings_group.setVisible(is_omni_sweep)
+
+    def _on_droidrun_enabled_changed(self, enabled: bool) -> None:
+        """Enable/disable DroidRun sub-controls."""
+        self.droidrun_reasoning_checkbox.setEnabled(enabled)
+        self.droidrun_max_cycles_input.setEnabled(enabled)
+        self.droidrun_streaming_checkbox.setEnabled(enabled)
+        self.droidrun_retry_count_input.setEnabled(enabled)
+
     def _on_limit_type_changed(self, checked: bool):
         """Handle limit type radio button toggle.
 
@@ -432,12 +475,36 @@ class SettingsPanel(QWidget):
         else:
             self.openrouter_api_key_input.setText("")  # Clear field if no valid key
 
+        anthropic_key = self._config_store.get_secret_plaintext("anthropic_api_key")
+        if anthropic_key:
+            self.anthropic_api_key_input.setText(anthropic_key)
+        else:
+            self.anthropic_api_key_input.setText("")  # Clear field if no valid key
+
         # Load crawl limits
         max_steps = self._config_store.get_setting("max_steps", default=100)
         self.max_steps_input.setValue(max_steps)
 
         max_duration = self._config_store.get_setting("max_duration_seconds", default=300)
         self.max_duration_input.setValue(max_duration)
+
+        # Load crawl mode
+        crawl_mode = self._config_store.get_setting("crawl_mode", default="droidrun")
+        crawl_mode_index = self.crawl_mode_combo.findData(crawl_mode)
+        if crawl_mode_index >= 0:
+            self.crawl_mode_combo.setCurrentIndex(crawl_mode_index)
+        self._on_crawl_mode_changed(self.crawl_mode_combo.currentIndex())
+
+        omni_sweep_mode = self._config_store.get_setting("omni_sweep_mode", default="breadth")
+        omni_sweep_mode_index = self.omni_sweep_mode_combo.findData(omni_sweep_mode)
+        if omni_sweep_mode_index >= 0:
+            self.omni_sweep_mode_combo.setCurrentIndex(omni_sweep_mode_index)
+
+        omni_threshold = self._config_store.get_setting("omniparser_box_threshold", default=0.02)
+        self.omni_threshold_input.setValue(float(omni_threshold))
+
+        omni_local_url = self._config_store.get_setting("omniparser_local_url", default="http://localhost:8000")
+        self.omni_local_url_input.setText(omni_local_url)
 
         # Load screen configuration
         top_bar_height = self._config_store.get_setting("top_bar_height", default=0)
@@ -526,6 +593,10 @@ class SettingsPanel(QWidget):
             if openrouter_key and not self._validate_api_key(openrouter_key, "OpenRouter"):
                 return
 
+            anthropic_key = self.anthropic_api_key_input.text().strip()
+            if anthropic_key and not self._validate_api_key(anthropic_key, "Anthropic"):
+                return
+
             # Validate MobSF API URL if MobSF is enabled
             if self.enable_mobsf_analysis_checkbox.isChecked():
                 mobsf_url = self.mobsf_api_url_input.text().strip()
@@ -543,9 +614,21 @@ class SettingsPanel(QWidget):
             else:
                 self._config_store.delete_secret("openrouter_api_key")
 
+            if anthropic_key:
+                self._config_store.set_secret_plaintext("anthropic_api_key", anthropic_key)
+            else:
+                self._config_store.delete_secret("anthropic_api_key")
+
             # Save crawl limits
             self._config_store.set_setting("max_steps", self.max_steps_input.value(), "int")
             self._config_store.set_setting("max_duration_seconds", self.max_duration_input.value(), "int")
+
+            # Save crawl mode
+            self._config_store.set_setting("crawl_mode", self.crawl_mode_combo.currentData(), "string")
+            self._config_store.set_setting("omni_sweep_mode", self.omni_sweep_mode_combo.currentData(), "string")
+            self._config_store.set_setting("omniparser_box_threshold", self.omni_threshold_input.value(), "float")
+            omni_local_url = self.omni_local_url_input.text().strip() or "http://localhost:8000"
+            self._config_store.set_setting("omniparser_local_url", omni_local_url, "string")
 
             # Save limit type preference
             limit_type = "steps" if self.steps_radio.isChecked() else "duration"
@@ -653,6 +736,14 @@ class SettingsPanel(QWidget):
             Current OpenRouter API key
         """
         return self.openrouter_api_key_input.text()
+
+    def get_anthropic_api_key(self) -> str:
+        """Get the current Anthropic API key value.
+
+        Returns:
+            Current Anthropic API key
+        """
+        return self.anthropic_api_key_input.text()
 
     def get_max_steps(self) -> int:
         """Get the current max steps value.
@@ -774,9 +865,12 @@ class SettingsPanel(QWidget):
         """Reset all settings to default values."""
         self.gemini_api_key_input.clear()
         self.openrouter_api_key_input.clear()
+        self.anthropic_api_key_input.clear()
         self.replicate_api_key_input.clear()
         self.max_steps_input.setValue(100)
         self.max_duration_input.setValue(300)
+        self.crawl_mode_combo.setCurrentIndex(self.crawl_mode_combo.findData("droidrun"))
+        self.omni_sweep_mode_combo.setCurrentIndex(self.omni_sweep_mode_combo.findData("breadth"))
         self.test_username_input.clear()
         self.test_password_input.clear()
         self.ui_parser_mode_combo.setCurrentText("boost")
@@ -837,7 +931,7 @@ class SettingsPanel(QWidget):
             QMessageBox.warning(
                 self,
                 "Invalid MobSF API URL",
-                f"MobSF API URL must start with http:// or https://\n\nExample: http://localhost:8000",
+                "MobSF API URL must start with http:// or https://\n\nExample: http://localhost:8000",
             )
             return False
 
@@ -850,14 +944,14 @@ class SettingsPanel(QWidget):
                 QMessageBox.warning(
                     self,
                     "Invalid MobSF API URL",
-                    f"MobSF API URL appears to be malformed.\n\nExample: http://localhost:8000",
+                    "MobSF API URL appears to be malformed.\n\nExample: http://localhost:8000",
                 )
                 return False
         except Exception:
             QMessageBox.warning(
                 self,
                 "Invalid MobSF API URL",
-                f"MobSF API URL appears to be malformed.\n\nExample: http://localhost:8000",
+                "MobSF API URL appears to be malformed.\n\nExample: http://localhost:8000",
             )
             return False
 

@@ -107,3 +107,57 @@ When exploration_progress shows low discovery or you're revisiting screens repea
 - Successfully navigate common app flows (login, signup, settings)
 
 Make decisions that MAXIMIZE NEW SCREEN DISCOVERY while maintaining systematic coverage."""
+
+
+# --- OmniParser Deterministic Sweep mode prompts ---
+# These are short, single-purpose judgment prompts (NOT the full agent prompt above).
+# They are used to cut LLM calls down to a handful of classification tasks per screen.
+
+OMNI_NOISE_FILTER_PROMPT = """You are filtering and grouping UI element bounding boxes detected on an Android screenshot.
+
+You will be given:
+- The screenshot (annotated or plain)
+- A JSON list of detected boxes, each with: "id" (integer), "bbox" ([x1,y1,x2,y2] pixels), "content" (OCR/label text, may be empty)
+
+Your tasks:
+1. Discard boxes that are clearly NOT real interactive elements: ads, decorative icons/dividers, status bar / nav bar items, background images, watermarks, or duplicate overlapping boxes covering the same control.
+2. Group boxes that are visually close together AND likely lead to the same destination or perform the same action (e.g. an icon + its text label, or a row of small icons that are part of one control) into a single group.
+
+Respond with ONLY a JSON object of this exact shape, no other text:
+{
+  "keep": [<ids of boxes to keep, after dropping noise>],
+  "groups": [[<id>, <id>, ...], ...]
+}
+
+Every kept id should appear in exactly one group (a group may contain a single id if it should not be merged with anything)."""
+
+
+OMNI_OUTCOME_JUDGE_PROMPT = """You are judging the result of tapping a UI element on an Android device.
+
+You will be given two screenshots:
+1. "before" - the screen immediately before the tap
+2. "after" - the screen immediately after the tap
+
+A heuristic pixel-diff comparison was inconclusive, so use your visual judgment.
+
+Classify the outcome as exactly one of:
+- "navigated": the app moved to a different screen (new activity/page/dialog took over the view)
+- "in_place_change": the same screen is shown but with a visible change (e.g. dropdown expanded, tab switched, item selected/highlighted, modal opened on top)
+- "no_change": nothing meaningfully changed (tap had no visible effect, or only a transient ripple/animation)
+
+Respond with ONLY a JSON object of this exact shape, no other text:
+{"outcome": "navigated" | "in_place_change" | "no_change", "reason": "<short one-sentence explanation>"}"""
+
+
+OMNI_SUBPROBE_PROMPT = """You are deciding whether probing the edges of a UI element bounding box revealed a new interactive sub-element.
+
+You will be given two screenshots:
+1. "before" - the screen before tapping near the edge of a bounding box
+2. "after" - the screen after that tap
+
+A heuristic pixel-diff comparison was inconclusive, so use your visual judgment.
+
+Decide whether this edge tap revealed/activated a DIFFERENT control than the main element (e.g. a small icon button at the edge of a larger card, a checkbox at the edge of a row), which would mean the original bounding box should be redrawn/split into separate elements.
+
+Respond with ONLY a JSON object of this exact shape, no other text:
+{"redraw": true | false, "reason": "<short one-sentence explanation>"}"""

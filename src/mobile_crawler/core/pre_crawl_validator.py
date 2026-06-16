@@ -86,6 +86,12 @@ class PreCrawlValidator:
             if api_key_error:
                 errors.append(api_key_error)
 
+        # 5b. Check OmniParser backend reachable (only for OmniParser Sweep crawl mode)
+        if self._config_manager.get("crawl_mode", "droidrun") == "omni_sweep":
+            omni_error = self._check_omniparser_available()
+            if omni_error:
+                errors.append(omni_error)
+
         # 6. Check MobSF server reachable (only if MobSF analysis is enabled)
         if self._config_manager.get("enable_mobsf_analysis", False):
             mobsf_warning = self._check_mobsf_reachable()
@@ -270,6 +276,64 @@ class PreCrawlValidator:
                     message=f"Failed to check API key: {e}",
                     severity="error"
                 )
+
+        # Check for Anthropic API key
+        if ai_provider == "anthropic":
+            try:
+                api_key = self._credential_store.get("anthropic_api_key")
+                if not api_key:
+                    return ValidationError(
+                        field="anthropic_api_key",
+                        message="Anthropic API key not configured. Set it in settings.",
+                        severity="error"
+                    )
+            except Exception as e:
+                logger.error(f"Error checking Anthropic API key: {e}")
+                return ValidationError(
+                    field="anthropic_api_key",
+                    message=f"Failed to check API key: {e}",
+                    severity="error"
+                )
+
+        return None
+
+    def _check_omniparser_available(self) -> Optional[ValidationError]:
+        """Check that an OmniParser backend is reachable for OmniParser Sweep mode.
+
+        Returns:
+            ValidationError if no usable OmniParser backend is configured, else None
+        """
+        from mobile_crawler.domain.omni_parser_client import OmniParserClient
+
+        backend = self._config_manager.get("omniparser_backend", "local")
+
+        if backend == "local":
+            client = OmniParserClient(self._config_manager)
+            if client.check_local_available():
+                return None
+            return ValidationError(
+                field="omniparser_backend",
+                message="Local OmniParser backend is not reachable. Start the local "
+                        "OmniParser server or switch omniparser_backend to 'replicate'.",
+                severity="error"
+            )
+
+        # Replicate backend: require an API key
+        try:
+            api_key = self._credential_store.get("replicate_api_key")
+            if not api_key:
+                return ValidationError(
+                    field="replicate_api_key",
+                    message="Replicate API key not configured. Set it in settings.",
+                    severity="error"
+                )
+        except Exception as e:
+            logger.error(f"Error checking Replicate API key: {e}")
+            return ValidationError(
+                field="replicate_api_key",
+                message=f"Failed to check API key: {e}",
+                severity="error"
+            )
 
         return None
 
